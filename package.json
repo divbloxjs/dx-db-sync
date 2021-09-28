@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/divbloxjs/dx-db-sync#readme",
   "dependencies": {
-    "dx-db-connector": "github:divbloxjs/dx-db-connector"
+    "dx-db-connector": "github:divbloxjs/dx-db-connector",
+    "dx-utils": "github:divbloxjs/dx-utils"
   }
 }
