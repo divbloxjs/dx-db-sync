@@ -1,0 +1,27 @@
+{
+  "name": "dx-db-sync",
+  "version": "1.0.0",
+  "description": "A tool that synchronises a given database with a provided Divblox data model. Used by divbloxjs to ensure that the underlying database corresponds to the given data model.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/divbloxjs/dx-db-sync.git"
+  },
+  "keywords": [
+    "divbloxjs",
+    "nodejs",
+    "mysql"
+  ],
+  "author": "Johan Griesel, johan@stratusolve.com (Stratusolve (Pty)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/divbloxjs/dx-db-sync/issues"
+  },
+  "homepage": "https://github.com/divbloxjs/dx-db-sync#readme",
+  "dependencies": {
+    "dx-db-connector": "github:divbloxjs/dx-db-connector"
+  }
+}
