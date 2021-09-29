@@ -9,6 +9,7 @@ class DivbloxDatabaseSync {
         this.commandLineHeadingFormatting = dxUtils.commandLineColors.foregroundCyan+dxUtils.commandLineColors.bright;
         this.commandLineSubHeadingFormatting = dxUtils.commandLineColors.foregroundCyan+dxUtils.commandLineColors.dim;
         this.errorInfo = [];
+        this.foreignKeyChecksDisabled = false;
     }
 
     //#region Helpers
@@ -53,7 +54,6 @@ class DivbloxDatabaseSync {
             const moduleName = this.dataModel[entityName].module;
             entityModuleMapping[moduleName].push(entityName);
         }
-        console.log("EMM: "+JSON.stringify(entityModuleMapping));
         return entityModuleMapping;
     }
     //#endregion
@@ -75,9 +75,11 @@ class DivbloxDatabaseSync {
             return;
         }
         //TODO: Execute sync functions in order here
-        // Remove tables
+        // Remove tables - IMPLEMENTED
         // Create tables
-        //
+        // Update tables (excluding relationships)
+        // Update table indexes
+        // Update relationships
 
         dxUtils.outputFormattedLog("Analyzing database...",this.commandLineSubHeadingFormatting);
         this.existingTables = await this.getDatabaseTables();
@@ -88,7 +90,9 @@ class DivbloxDatabaseSync {
         console.log("Based on the data model, we are expecting "+this.expectedTables.length+" table(s)");
         if (!await this.removeTables()) {
             this.printError("Error while attempting to remove tables:\n"+JSON.stringify(this.errorInfo,null,2));
-            return;
+            process.exit(0);
+        } else {
+            dxUtils.outputFormattedLog("Database clean up completed!",this.commandLineSubHeadingFormatting);
         }
         /*console.log("To create: ");
         console.dir(this.tablesToCreate);
@@ -98,13 +102,15 @@ class DivbloxDatabaseSync {
     }
     async disableForeignKeyChecks() {
         for (const moduleName of Object.keys(this.databaseConfig)) {
-            const queryResult = await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 0", moduleName);
+            await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 0", moduleName);
         }
+        this.foreignKeyChecksDisabled = true;
     }
     async restoreForeignKeyChecks() {
         for (const moduleName of Object.keys(this.databaseConfig)) {
             await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 1", moduleName);
         }
+        this.foreignKeyChecksDisabled = false;
     }
     async removeTables() {
         this.startNewCommandLineSection("Existing table clean up");
@@ -118,31 +124,57 @@ class DivbloxDatabaseSync {
                 const answerList = await dxUtils.getCommandLineInput('How would you like to proceed?\n' +
                     'Type \'y\' to confirm & remove one-by-one;\nType \'all\' to remove all;\n' +
                     'Type \'none\' to skip removing any tables; (y|all|none)');
+                switch (answerList.toString().toLowerCase()) {
+                    case 'all':await this.removeTablesRecursive(false);
+                        break;
+                    case 'y':await this.removeTablesRecursive(true);
+                        break;
+                    case 'none':return true;
+                    default: this.errorInfo.push("Invalid selection. Please try again.");
+                        return false;
+                }
                 break;
             case 'all':await this.removeTablesRecursive(false);
                 break;
+            case 'y':await this.removeTablesRecursive(true);
+                break;
+            case 'none':return true;
             default: this.errorInfo.push("Invalid selection. Please try again.");
                 return false;
         }
         return true;
     }
     async removeTablesRecursive(mustConfirm = true) {
-        await this.disableForeignKeyChecks();
+        const entityModuleMapping = this.getEntityModuleMapping();
+        if (!this.foreignKeyChecksDisabled) {
+            await this.disableForeignKeyChecks();
+        }
         if (!mustConfirm) {
             // Not going to be recursive. Just a single call to drop all relevant tables
-            const entityModuleMapping = this.getEntityModuleMapping();
             for (const moduleName of Object.keys(this.databaseConfig)) {
                 if ((typeof entityModuleMapping[moduleName] !== undefined) &&
                     (entityModuleMapping[moduleName].length > 0)) {
                     const tablesToDrop = this.tablesToRemove.filter(x => !entityModuleMapping[moduleName].includes(x));
                     const tablesToDropStr = tablesToDrop.join(",");
                     const queryResult = await this.databaseConnector.queryDB("DROP TABLE if exists "+tablesToDropStr, moduleName);
-                    console.dir(queryResult);
                 }
             }
-
+        } else {
+            if (this.tablesToRemove.length === 0) {
+                return;
+            }
+            const answer = await dxUtils.getCommandLineInput('Drop table "'+this.tablesToRemove[0]+'"? (y/n)');
+            if (answer.toString().toLowerCase() === 'y') {
+                for (const moduleName of Object.keys(this.databaseConfig)) {
+                    await this.databaseConnector.queryDB("DROP TABLE if exists "+this.tablesToRemove[0], moduleName);
+                }
+            }
+            this.tablesToRemove.shift();
+            await this.removeTablesRecursive(true)
         }
-        await this.restoreForeignKeyChecks();
+        if (this.foreignKeyChecksDisabled) {
+            await this.restoreForeignKeyChecks();
+        }
     }
 }
 
