@@ -75,6 +75,10 @@ class DivbloxDatabaseSync {
             return;
         }
         //TODO: Execute sync functions in order here
+        // Remove tables
+        // Create tables
+        //
+
         dxUtils.outputFormattedLog("Analyzing database...",this.commandLineSubHeadingFormatting);
         this.existingTables = await this.getDatabaseTables();
         this.expectedTables = Object.keys(this.dataModel);
@@ -90,11 +94,11 @@ class DivbloxDatabaseSync {
         console.dir(this.tablesToCreate);
         console.log("To remove: ");
         console.dir(this.tablesToRemove);*/
+        process.exit(0);
     }
     async disableForeignKeyChecks() {
         for (const moduleName of Object.keys(this.databaseConfig)) {
             const queryResult = await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 0", moduleName);
-            console.log("Foreign key disable result: "+JSON.stringify(queryResult)+"; error: "+JSON.stringify(this.databaseConnector.getError()));
         }
     }
     async restoreForeignKeyChecks() {
