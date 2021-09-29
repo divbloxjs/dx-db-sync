@@ -27,23 +27,24 @@ class DivbloxDatabaseSync {
             dxUtils.commandLineColors.foregroundRed);
     }
     async getDatabaseTables() {
-        let tables = [];
+        let tables = {};
         for (const moduleName of Object.keys(this.databaseConfig)) {
-            const moduleTables = await this.databaseConnector.queryDB("show tables", moduleName);
+            const moduleTables = await this.databaseConnector.queryDB("show full tables", moduleName);
+            const databaseName = this.databaseConfig[moduleName]["database"];
             for (let i=0; i < moduleTables.length; i++) {
                 const dataPacket = moduleTables[i];
-                for (const dataPacketKeys of Object.keys(dataPacket)) {
-                    tables.push(dataPacket[dataPacketKeys]);
-                }
+                tables[dataPacket["Tables_in_"+databaseName]] = dataPacket["Table_type"];
             }
         }
         return tables;
     }
     getTablesToCreate() {
-        return this.expectedTables.filter(x => !this.existingTables.includes(x));
+        const existingTablesArray = Object.keys(this.existingTables);
+        return this.expectedTables.filter(x => !existingTablesArray.includes(x));
     }
     getTablesToRemove() {
-        return this.existingTables.filter(x => !this.expectedTables.includes(x));
+        const existingTablesArray = Object.keys(this.existingTables);
+        return existingTablesArray.filter(x => !this.expectedTables.includes(x));
     }
     getEntityModuleMapping() {
         let entityModuleMapping = {};
@@ -86,7 +87,7 @@ class DivbloxDatabaseSync {
         this.expectedTables = Object.keys(this.dataModel);
         this.tablesToCreate = this.getTablesToCreate();
         this.tablesToRemove = this.getTablesToRemove();
-        console.log("Database currently "+this.existingTables.length+" table(s)");
+        console.log("Database currently "+Object.keys(this.existingTables).length+" table(s)");
         console.log("Based on the data model, we are expecting "+this.expectedTables.length+" table(s)");
         if (!await this.removeTables()) {
             this.printError("Error while attempting to remove tables:\n"+JSON.stringify(this.errorInfo,null,2));
@@ -94,10 +95,13 @@ class DivbloxDatabaseSync {
         } else {
             dxUtils.outputFormattedLog("Database clean up completed!",this.commandLineSubHeadingFormatting);
         }
-        /*console.log("To create: ");
-        console.dir(this.tablesToCreate);
-        console.log("To remove: ");
-        console.dir(this.tablesToRemove);*/
+
+        if (!await this.createTables()) {
+            this.printError("Error while attempting to create new tables:\n"+JSON.stringify(this.errorInfo,null,2));
+            process.exit(0);
+        } else {
+            dxUtils.outputFormattedLog("New tables created!",this.commandLineSubHeadingFormatting);
+        }
         process.exit(0);
     }
     async disableForeignKeyChecks() {
@@ -120,7 +124,7 @@ class DivbloxDatabaseSync {
             'Type \'none\' to skip removing any tables;\nType \'list\' to show tables that will be removed (y|all|none|list)');
 
         switch (answer.toString().toLowerCase()) {
-            case 'list': console.dir(this.tablesToRemove);
+            case 'list': this.listTablesToRemove()
                 const answerList = await dxUtils.getCommandLineInput('How would you like to proceed?\n' +
                     'Type \'y\' to confirm & remove one-by-one;\nType \'all\' to remove all;\n' +
                     'Type \'none\' to skip removing any tables; (y|all|none)');
@@ -175,6 +179,16 @@ class DivbloxDatabaseSync {
         if (this.foreignKeyChecksDisabled) {
             await this.restoreForeignKeyChecks();
         }
+    }
+    listTablesToRemove() {
+        for (const table of this.tablesToRemove) {
+            dxUtils.outputFormattedLog(table+" ("+this.existingTables[table]+")",dxUtils.commandLineColors.foregroundGreen);
+        }
+    }
+    async createTables() {
+        this.startNewCommandLineSection("Creating new tables...");
+        dxUtils.outputFormattedLog(this.tablesToCreate.length+" new table(s) to create.",this.commandLineSubHeadingFormatting);
+        return true;
     }
 }
 
