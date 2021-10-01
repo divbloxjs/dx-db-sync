@@ -205,7 +205,6 @@ class DivbloxDatabaseSync {
     async createTables() {
         this.startNewCommandLineSection("Creating new tables...");
         dxUtils.outputFormattedLog(this.tablesToCreate.length+" new table(s) to create.",this.commandLineSubHeadingFormatting);
-        //TODO: Implement this
         for (const tableName of this.tablesToCreate) {
             const tableNameSqlReady = dxUtils.getCamelCaseSplittedToLowerCase(tableName,"_");
             const moduleName = this.dataModel[tableName]["module"];
