@@ -206,6 +206,16 @@ class DivbloxDatabaseSync {
         this.startNewCommandLineSection("Creating new tables...");
         dxUtils.outputFormattedLog(this.tablesToCreate.length+" new table(s) to create.",this.commandLineSubHeadingFormatting);
         //TODO: Implement this
+        for (const tableName of this.tablesToCreate) {
+            const tableNameSqlReady = dxUtils.getCamelCaseSplittedToLowerCase(tableName,"_");
+            const moduleName = this.dataModel[tableName]["module"];
+            const createTableSql = 'CREATE TABLE `'+tableNameSqlReady+'` ( `id` BIGINT NOT NULL AUTO_INCREMENT , PRIMARY KEY (`id`));';
+            const createResult = await this.databaseConnector.queryDB(createTableSql, moduleName);
+            if (typeof createResult["error"] !== "undefined") {
+                this.errorInfo.push(createResult["error"]);
+                return false;
+            }
+        }
         return true;
     }
 }
