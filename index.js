@@ -89,6 +89,8 @@ class DivbloxDatabaseSync {
         this.tablesToRemove = this.getTablesToRemove();
         console.log("Database currently "+Object.keys(this.existingTables).length+" table(s)");
         console.log("Based on the data model, we are expecting "+this.expectedTables.length+" table(s)");
+
+        // 1. Remove tables that are not in the data model
         if (!await this.removeTables()) {
             this.printError("Error while attempting to remove tables:\n"+JSON.stringify(this.errorInfo,null,2));
             process.exit(0);
@@ -96,12 +98,27 @@ class DivbloxDatabaseSync {
             dxUtils.outputFormattedLog("Database clean up completed!",this.commandLineSubHeadingFormatting);
         }
 
+        // 2. Create any new tables that are in the data model but not in the database
         if (!await this.createTables()) {
             this.printError("Error while attempting to create new tables:\n"+JSON.stringify(this.errorInfo,null,2));
             process.exit(0);
         } else {
             dxUtils.outputFormattedLog("New tables created!",this.commandLineSubHeadingFormatting);
         }
+
+        // 3. Loop through all the entities in the data model and update their corresponding database tables
+        //      to ensure that their columns match the data model attribute names and types
+        //TODO: Implement this
+
+        // 4. Loop through all the entities in the data model and update their corresponding database tables
+        //      to ensure that their indexes match the data model indexes
+        //TODO: Implement this
+
+        // 5. Loop through all the entities in the data model and update their corresponding database tables
+        //      to ensure that their relationships match the data model relationships. Here we either create new
+        //      foreign key constraints or drop existing ones where necessary
+        //TODO: Implement this
+
         process.exit(0);
     }
     async disableForeignKeyChecks() {
@@ -188,6 +205,7 @@ class DivbloxDatabaseSync {
     async createTables() {
         this.startNewCommandLineSection("Creating new tables...");
         dxUtils.outputFormattedLog(this.tablesToCreate.length+" new table(s) to create.",this.commandLineSubHeadingFormatting);
+        //TODO: Implement this
         return true;
     }
 }
