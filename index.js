@@ -77,14 +77,17 @@ class DivbloxDatabaseSync {
         }
         //TODO: Execute sync functions in order here
         // Remove tables - IMPLEMENTED
-        // Create tables
+        // Create tables - IMPLEMENTED
         // Update tables (excluding relationships)
         // Update table indexes
         // Update relationships
 
         dxUtils.outputFormattedLog("Analyzing database...",this.commandLineSubHeadingFormatting);
         this.existingTables = await this.getDatabaseTables();
-        this.expectedTables = Object.keys(this.dataModel);
+        this.expectedTables = [];
+        for (const expectedTable of Object.keys(this.dataModel)) {
+            this.expectedTables.push(dxUtils.getCamelCaseSplittedToLowerCase(expectedTable,"_"));
+        }
         this.tablesToCreate = this.getTablesToCreate();
         this.tablesToRemove = this.getTablesToRemove();
         console.log("Database currently "+Object.keys(this.existingTables).length+" table(s)");
@@ -103,7 +106,7 @@ class DivbloxDatabaseSync {
             this.printError("Error while attempting to create new tables:\n"+JSON.stringify(this.errorInfo,null,2));
             process.exit(0);
         } else {
-            dxUtils.outputFormattedLog("New tables created!",this.commandLineSubHeadingFormatting);
+            dxUtils.outputFormattedLog("Table creation completed!",this.commandLineSubHeadingFormatting);
         }
 
         // 3. Loop through all the entities in the data model and update their corresponding database tables
@@ -135,6 +138,10 @@ class DivbloxDatabaseSync {
     }
     async removeTables() {
         this.startNewCommandLineSection("Existing table clean up");
+        if (this.tablesToRemove.length === 0) {
+            console.log("There are no tables to remove.")
+            return true;
+        }
         const answer = await dxUtils.getCommandLineInput('Removing tables that are not defined in the provided ' +
             'data model...\n'+this.tablesToRemove.length+' tables should be removed.\n' +
             'How would you like to proceed?\nType \'y\' to confirm & remove one-by-one;\nType \'all\' to remove all;\n' +
@@ -204,11 +211,15 @@ class DivbloxDatabaseSync {
     }
     async createTables() {
         this.startNewCommandLineSection("Creating new tables...");
-        dxUtils.outputFormattedLog(this.tablesToCreate.length+" new table(s) to create.",this.commandLineSubHeadingFormatting);
+        if (this.tablesToCreate.length === 0) {
+            console.log("There are no tables to create.");
+            return true;
+        }
+        console.log(this.tablesToCreate.length+" new table(s) to create.");
         for (const tableName of this.tablesToCreate) {
-            const tableNameSqlReady = dxUtils.getCamelCaseSplittedToLowerCase(tableName,"_");
-            const moduleName = this.dataModel[tableName]["module"];
-            const createTableSql = 'CREATE TABLE `'+tableNameSqlReady+'` ( `id` BIGINT NOT NULL AUTO_INCREMENT , PRIMARY KEY (`id`));';
+            const tableNameDataModel = dxUtils.convertLowerCaseToCamelCase(tableName,"_");
+            const moduleName = this.dataModel[tableNameDataModel]["module"];
+            const createTableSql = 'CREATE TABLE `'+tableName+'` ( `id` BIGINT NOT NULL AUTO_INCREMENT , PRIMARY KEY (`id`));';
             const createResult = await this.databaseConnector.queryDB(createTableSql, moduleName);
             if (typeof createResult["error"] !== "undefined") {
                 this.errorInfo.push(createResult["error"]);
