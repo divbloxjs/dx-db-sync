@@ -111,7 +111,12 @@ class DivbloxDatabaseSync {
 
         // 3. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their columns match the data model attribute names and types
-        //TODO: Implement this
+        if (!await this.updateTables()) {
+            this.printError("Error while attempting to update tables:\n"+JSON.stringify(this.errorInfo,null,2));
+            process.exit(0);
+        } else {
+            dxUtils.outputFormattedLog("Table modification completed!",this.commandLineSubHeadingFormatting);
+        }
 
         // 4. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their indexes match the data model indexes
@@ -226,6 +231,33 @@ class DivbloxDatabaseSync {
                 return false;
             }
         }
+        return true;
+    }
+    async updateTables() {
+        for (const entityName of Object.keys(this.dataModel)) {
+            const moduleName = this.dataModel[entityName]["module"];
+            const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName,"_");
+            const tableColumns = await this.databaseConnector.queryDB("SHOW FULL COLUMNS FROM "+tableName,moduleName);
+            let tableColumnsNormalized = {};
+            const entityAttributes = this.dataModel[entityName]["attributes"];
+            for (const tableColumn of tableColumns) {
+                const allowNull = tableColumn["Null"] !== 'NO';
+                const typeParts =  tableColumn["Type"].split("(");
+                const baseType = typeParts[0];
+                const typeLength = typeParts.length > 1 ? typeParts[1].replace(")","") : null;
+                tableColumnsNormalized[tableColumn["Field"]] = {
+                    "type": baseType,
+                    "lengthOrValues": parseInt(typeLength),
+                    "default": tableColumn["Default"],
+                    "allowNull": allowNull
+                };
+            }
+            console.log("Normalized: "+JSON.stringify(tableColumnsNormalized));
+            console.log("Columns for "+tableName+": "+JSON.stringify(this.databaseConnector.getError()));
+            console.dir(tableColumns);
+        }
+
+        //TODO: Finish this
         return true;
     }
 }
