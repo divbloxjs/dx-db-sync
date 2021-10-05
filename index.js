@@ -57,6 +57,39 @@ class DivbloxDatabaseSync {
         }
         return entityModuleMapping;
     }
+    getEntityRelationshipColumns(entityName) {
+        let entityRelationshipColumns = [];
+        const entityRelationships = this.dataModel[entityName]["relationships"];
+        for (const entityRelationship of Object.keys(entityRelationships)) {
+            for (const relationshipName of entityRelationships[entityRelationship]) {
+                entityRelationshipColumns.push(entityRelationship+"_"+relationshipName)   ;
+            }
+        }
+        return entityRelationshipColumns;
+    }
+    getEntityExpectedColumns(entityName) {
+        let expectedColumns = ["id"];
+        for (const attributeColumn of Object.keys(this.dataModel[entityName]["attributes"])) {
+            expectedColumns.push(dxUtils.getCamelCaseSplittedToLowerCase(attributeColumn,"_"));
+        }
+        for (const relationshipColumn of this.getEntityRelationshipColumns(entityName)) {
+            expectedColumns.push(dxUtils.getCamelCaseSplittedToLowerCase(relationshipColumn,"_"));
+        }
+        return expectedColumns;
+    }
+    getAlterColumnSql(columnName = '', columnDataModelObject = {}) {
+        let sql = 'MODIFY COLUMN '+columnName+' '+columnDataModelObject["type"];
+        if (columnDataModelObject["lengthOrValues"] !== null) {
+            sql += '('+columnDataModelObject["lengthOrValues"]+')';
+        }
+        if (columnDataModelObject["allowNull"] === false) {
+            sql += ' NOT NULL';
+        }
+        if (columnDataModelObject["default"] !== null) {
+            sql += " DEFAULT '"+columnDataModelObject["default"]+"';"
+        }
+        return sql;
+    }
     //#endregion
 
     async syncDatabase() {
@@ -75,7 +108,16 @@ class DivbloxDatabaseSync {
             this.printError("Database init failed: "+JSON.stringify(this.databaseConnector.getError()));
             return;
         }
+
+        if (!await this.checkDataModelIntegrity()) {
+            this.printError("Data model integrity check failed! Error:\n"+JSON.stringify(this.errorInfo,null,2));
+            process.exit(0);
+        } else {
+            dxUtils.outputFormattedLog("Data model integrity check succeeded!",this.commandLineSubHeadingFormatting);
+        }
+
         //TODO: Execute sync functions in order here
+        // Check data model integrity
         // Remove tables - IMPLEMENTED
         // Create tables - IMPLEMENTED
         // Update tables (excluding relationships)
@@ -128,6 +170,10 @@ class DivbloxDatabaseSync {
         //TODO: Implement this
 
         process.exit(0);
+    }
+    async checkDataModelIntegrity() {
+        //TODO: Ensure that the provided data model conforms to the expected standard. And return false if not.
+        return true;
     }
     async disableForeignKeyChecks() {
         for (const moduleName of Object.keys(this.databaseConfig)) {
@@ -234,27 +280,45 @@ class DivbloxDatabaseSync {
         return true;
     }
     async updateTables() {
+        let sqlQuery = '';
         for (const entityName of Object.keys(this.dataModel)) {
             const moduleName = this.dataModel[entityName]["module"];
             const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName,"_");
             const tableColumns = await this.databaseConnector.queryDB("SHOW FULL COLUMNS FROM "+tableName,moduleName);
             let tableColumnsNormalized = {};
+
             const entityAttributes = this.dataModel[entityName]["attributes"];
+            const entityRelationships = this.dataModel[entityName]["relationships"];
+            const expectedColumns = this.getEntityExpectedColumns(entityName);
+
             for (const tableColumn of tableColumns) {
+                const columnAttributeName = dxUtils.convertLowerCaseToCamelCase(tableColumn["Field"],"_");
+                if (!expectedColumns.includes(columnAttributeName)) {
+                    sqlQuery += 'ALTER TABLE '+tableName+' DROP COLUMN '+tableColumn["Field"]+';';
+                    continue;
+                }
                 const allowNull = tableColumn["Null"] !== 'NO';
                 const typeParts =  tableColumn["Type"].split("(");
                 const baseType = typeParts[0];
                 const typeLength = typeParts.length > 1 ? typeParts[1].replace(")","") : null;
+
                 tableColumnsNormalized[tableColumn["Field"]] = {
                     "type": baseType,
                     "lengthOrValues": parseInt(typeLength),
                     "default": tableColumn["Default"],
                     "allowNull": allowNull
                 };
+                for (const columnOption of Object.keys(tableColumnsNormalized[tableColumn["Field"]])) {
+                    if (entityAttributes[columnAttributeName][columnOption] !== tableColumnsNormalized[tableColumn["Field"]][columnOption]) {
+                        sqlQuery += this.getAlterColumnSql(columnAttributeName, entityAttributes[columnAttributeName]);
+                        continue;
+                    }
+                }
             }
             console.log("Normalized: "+JSON.stringify(tableColumnsNormalized));
             console.log("Columns for "+tableName+": "+JSON.stringify(this.databaseConnector.getError()));
             console.dir(tableColumns);
+            console.log("SQL: "+sqlQuery);
         }
 
         //TODO: Finish this
