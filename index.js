@@ -77,17 +77,29 @@ class DivbloxDatabaseSync {
         }
         return expectedColumns;
     }
-    getAlterColumnSql(columnName = '', columnDataModelObject = {}) {
-        let sql = 'MODIFY COLUMN '+columnName+' '+columnDataModelObject["type"];
+    getAlterColumnSql(columnName = '', columnDataModelObject = {}, operation = "MODIFY") {
+        let sql = operation+' COLUMN '+columnName+' '+columnDataModelObject["type"];
+        if (columnName === "id") {
+            sql = operation+' COLUMN `id` BIGINT NOT NULL AUTO_INCREMENT FIRST, ADD PRIMARY KEY (`id`);';
+            return sql;
+        }
         if (columnDataModelObject["lengthOrValues"] !== null) {
             sql += '('+columnDataModelObject["lengthOrValues"]+')';
         }
         if (columnDataModelObject["allowNull"] === false) {
             sql += ' NOT NULL';
         }
+
         if (columnDataModelObject["default"] !== null) {
-            sql += " DEFAULT '"+columnDataModelObject["default"]+"';"
+            if (columnDataModelObject["default"] !== "CURRENT_TIMESTAMP") {
+                sql += " DEFAULT '"+columnDataModelObject["default"]+"';"
+            } else {
+                sql += " DEFAULT CURRENT_TIMESTAMP;"
+            }
+        } else if (columnDataModelObject["allowNull"] !== false) {
+            sql += " DEFAULT NULL;"
         }
+
         return sql;
     }
     //#endregion
@@ -120,7 +132,7 @@ class DivbloxDatabaseSync {
         // Check data model integrity
         // Remove tables - IMPLEMENTED
         // Create tables - IMPLEMENTED
-        // Update tables (excluding relationships)
+        // Update tables (excluding relationships) - IMPLEMENTED
         // Update table indexes
         // Update relationships
 
@@ -132,7 +144,7 @@ class DivbloxDatabaseSync {
         }
         this.tablesToCreate = this.getTablesToCreate();
         this.tablesToRemove = this.getTablesToRemove();
-        console.log("Database currently "+Object.keys(this.existingTables).length+" table(s)");
+        console.log("Database currently has "+Object.keys(this.existingTables).length+" table(s)");
         console.log("Based on the data model, we are expecting "+this.expectedTables.length+" table(s)");
 
         // 1. Remove tables that are not in the data model
@@ -173,6 +185,7 @@ class DivbloxDatabaseSync {
     }
     async checkDataModelIntegrity() {
         //TODO: Ensure that the provided data model conforms to the expected standard. And return false if not.
+        this.startNewCommandLineSection("Data model integrity check");
         return true;
     }
     async disableForeignKeyChecks() {
@@ -261,7 +274,7 @@ class DivbloxDatabaseSync {
         }
     }
     async createTables() {
-        this.startNewCommandLineSection("Creating new tables...");
+        this.startNewCommandLineSection("Create new tables");
         if (this.tablesToCreate.length === 0) {
             console.log("There are no tables to create.");
             return true;
@@ -280,23 +293,35 @@ class DivbloxDatabaseSync {
         return true;
     }
     async updateTables() {
-        let sqlQuery = '';
+        this.startNewCommandLineSection("Update existing tables");
+        let updatedTableCount = 0;
+        let sqlQuery = {};
         for (const entityName of Object.keys(this.dataModel)) {
             const moduleName = this.dataModel[entityName]["module"];
+            sqlQuery[moduleName] = [];
             const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName,"_");
             const tableColumns = await this.databaseConnector.queryDB("SHOW FULL COLUMNS FROM "+tableName,moduleName);
             let tableColumnsNormalized = {};
 
             const entityAttributes = this.dataModel[entityName]["attributes"];
-            const entityRelationships = this.dataModel[entityName]["relationships"];
             const expectedColumns = this.getEntityExpectedColumns(entityName);
+            let attributesProcessed = [];
 
             for (const tableColumn of tableColumns) {
-                const columnAttributeName = dxUtils.convertLowerCaseToCamelCase(tableColumn["Field"],"_");
-                if (!expectedColumns.includes(columnAttributeName)) {
-                    sqlQuery += 'ALTER TABLE '+tableName+' DROP COLUMN '+tableColumn["Field"]+';';
+                const columnName = tableColumn["Field"];
+                const columnAttributeName = dxUtils.convertLowerCaseToCamelCase(columnName,"_");
+                attributesProcessed.push(columnAttributeName);
+                if (columnAttributeName === "id") {
                     continue;
                 }
+                // Let's check for columns to drop
+                if (!expectedColumns.includes(columnName)) {
+                    console.log(columnName+" not in "+JSON.stringify(expectedColumns));
+                    sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` DROP COLUMN '+tableColumn["Field"]+';');
+                    continue;
+                }
+
+                // Now, let's check if the existing columns' configurations align with our data model
                 const allowNull = tableColumn["Null"] !== 'NO';
                 const typeParts =  tableColumn["Type"].split("(");
                 const baseType = typeParts[0];
@@ -304,24 +329,45 @@ class DivbloxDatabaseSync {
 
                 tableColumnsNormalized[tableColumn["Field"]] = {
                     "type": baseType,
-                    "lengthOrValues": parseInt(typeLength),
+                    "lengthOrValues": typeLength,
                     "default": tableColumn["Default"],
                     "allowNull": allowNull
                 };
                 for (const columnOption of Object.keys(tableColumnsNormalized[tableColumn["Field"]])) {
-                    if (entityAttributes[columnAttributeName][columnOption] !== tableColumnsNormalized[tableColumn["Field"]][columnOption]) {
-                        sqlQuery += this.getAlterColumnSql(columnAttributeName, entityAttributes[columnAttributeName]);
-                        continue;
+                    const dataModelOption = ((columnOption === "lengthOrValues") && (entityAttributes[columnAttributeName][columnOption] !== null)) ?
+                        entityAttributes[columnAttributeName][columnOption].toString() :
+                        entityAttributes[columnAttributeName][columnOption];
+                    if (dataModelOption !== tableColumnsNormalized[tableColumn["Field"]][columnOption]) {
+                        sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` '+this.getAlterColumnSql(columnName, entityAttributes[columnAttributeName], "MODIFY"));
+                        break;
                     }
                 }
             }
-            console.log("Normalized: "+JSON.stringify(tableColumnsNormalized));
-            console.log("Columns for "+tableName+": "+JSON.stringify(this.databaseConnector.getError()));
-            console.dir(tableColumns);
-            console.log("SQL: "+sqlQuery);
+
+            // Now, let's create any remaining new columns
+            let entityAttributesArray = Object.keys(entityAttributes);
+            entityAttributesArray.push("id");
+            const columnsToCreate = entityAttributesArray.filter(x => !attributesProcessed.includes(x));
+            for (const columnToCreate of columnsToCreate) {
+                const columnName = dxUtils.getCamelCaseSplittedToLowerCase(columnToCreate,"_");
+                sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` '+this.getAlterColumnSql(columnName, entityAttributes[columnToCreate], "ADD"));
+            }
         }
 
-        //TODO: Finish this
+        for (const moduleName of Object.keys(sqlQuery)) {
+            if (sqlQuery[moduleName].length === 0) {
+                continue;
+            }
+            for (const query of sqlQuery[moduleName]) {
+                const queryResult = await this.databaseConnector.queryDB(query, moduleName);
+                if (typeof queryResult["error"] !== "undefined") {
+                    this.errorInfo.push("Could not execute query: "+queryResult["error"]);
+                    return false;
+                }
+            }
+            updatedTableCount++;
+        }
+        console.log(updatedTableCount+" tables were updated");
         return true;
     }
 }

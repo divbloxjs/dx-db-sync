@@ -41,7 +41,7 @@ const dataModel = {
             },
             "objectId": {
                 "type": "bigint",
-                "lengthOrValues": null,
+                "lengthOrValues": 20,
                 "default": null,
                 "allowNull": true
             },
