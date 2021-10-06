@@ -8,6 +8,7 @@ class DivbloxDatabaseSync {
         this.databaseConnector = new dxDbConnector(this.databaseConfig);
         this.commandLineHeadingFormatting = dxUtils.commandLineColors.foregroundCyan+dxUtils.commandLineColors.bright;
         this.commandLineSubHeadingFormatting = dxUtils.commandLineColors.foregroundCyan+dxUtils.commandLineColors.dim;
+        this.commandLineWarningFormatting = dxUtils.commandLineColors.foregroundYellow;
         this.errorInfo = [];
         this.foreignKeyChecksDisabled = false;
     }
@@ -392,13 +393,42 @@ class DivbloxDatabaseSync {
             const moduleName = this.dataModel[entityName]["module"];
             const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName, "_");
             const indexCheckResult = await this.databaseConnector.queryDB("SHOW INDEX FROM "+tableName, moduleName);
-            console.dir(indexCheckResult);
+            let existingIndexes = [];
+            for (const index of indexCheckResult) {
+                existingIndexes.push(index['Key_name']);
+            }
+            for (const indexObj of this.dataModel[entityName]["indexes"]) {
+                if (!existingIndexes.includes(indexObj["indexName"])) {
+                    // Let's add this index
+                    console.log("Adding index '"+indexObj["indexName"]+"' on '"+entityName+"'...");
+                    const keyColumn = dxUtils.getCamelCaseSplittedToLowerCase(indexObj["attribute"],"_");
+                    switch (indexObj["indexChoice"].toLowerCase()) {
+                        case 'index':
+                            const indexAddResult =
+                                await this.databaseConnector.queryDB(
+                                    "ALTER TABLE `"+tableName+"` ADD INDEX `"+indexObj["indexName"]+"` (`"+keyColumn+"`) USING "+indexObj["type"]+";", moduleName);
+                            if (typeof indexAddResult["error"] !== "undefined") {
+                                this.errorInfo.push(indexAddResult["error"])
+                                return false;
+                            }
+                            break;
+                        //TODO: Finish this. Examples below
+                        default:
+                            this.errorInfo.push("Invalid index choice specified for " +
+                            "'"+indexObj["indexName"]+"' on '"+entityName+"'. " +
+                            "Provided: "+indexObj["indexChoice"]+"; " +
+                            "Valid options: index|unique|fulltext|spatial");
+                            return false;
+                    }
+                }
+            }
+            console.dir(existingIndexes);
         }
         /*ALTER TABLE `example_entity_one` ADD INDEX `exampleEntityOne_exampleOneBigInt` (`example_one_big_int`) USING BTREE;*/
         /*ALTER TABLE `example_entity_one` ADD UNIQUE `test` (`id`) USING BTREE;*/
         /*ALTER TABLE `example_entity_one` ADD SPATIAL `test2` (`example_one_big_int`); ONLY ON GEOMETRICAL FIELDS*/
         /*ALTER TABLE `example_entity_one` ADD FULLTEXT `test2` (`example_one_text`);*/
-        //TODO: Finish this
+
         return true;
     }
 }
