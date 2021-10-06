@@ -295,7 +295,7 @@ class DivbloxDatabaseSync {
     }
     async updateTables() {
         this.startNewCommandLineSection("Update existing tables");
-        let updatedTableCount = 0;
+        let updatedTables = [];
         let sqlQuery = {};
         for (const moduleName of Object.keys(this.databaseConfig)) {
             sqlQuery[moduleName] = [];
@@ -321,6 +321,9 @@ class DivbloxDatabaseSync {
                 // Let's check for columns to drop
                 if (!expectedColumns.includes(columnName)) {
                     sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` DROP COLUMN '+tableColumn["Field"]+';');
+                    if (!updatedTables.includes(entityName)) {
+                        updatedTables.push(entityName);
+                    }
                     continue;
                 }
 
@@ -342,6 +345,9 @@ class DivbloxDatabaseSync {
                         entityAttributes[columnAttributeName][columnOption];
                     if (dataModelOption !== tableColumnsNormalized[tableColumn["Field"]][columnOption]) {
                         sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` '+this.getAlterColumnSql(columnName, entityAttributes[columnAttributeName], "MODIFY"));
+                        if (!updatedTables.includes(entityName)) {
+                            updatedTables.push(entityName);
+                        }
                         break;
                     }
                 }
@@ -354,6 +360,9 @@ class DivbloxDatabaseSync {
             for (const columnToCreate of columnsToCreate) {
                 const columnName = dxUtils.getCamelCaseSplittedToLowerCase(columnToCreate,"_");
                 sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` '+this.getAlterColumnSql(columnName, entityAttributes[columnToCreate], "ADD"));
+                if (!updatedTables.includes(entityName)) {
+                    updatedTables.push(entityName);
+                }
             }
         }
 
@@ -368,9 +377,8 @@ class DivbloxDatabaseSync {
                     return false;
                 }
             }
-            updatedTableCount++;
         }
-        console.log(updatedTableCount+" tables were updated");
+        console.log(updatedTables.length+" tables were updated");
         return true;
     }
 }

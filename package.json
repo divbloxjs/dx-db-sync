@@ -4,7 +4,7 @@
   "description": "A tool that synchronises a given database with a provided Divblox data model. Used by divbloxjs to ensure that the underlying database corresponds to the given data model.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node ./tests/test.js"
   },
   "repository": {
     "type": "git",
