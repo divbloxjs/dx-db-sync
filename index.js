@@ -175,7 +175,12 @@ class DivbloxDatabaseSync {
 
         // 4. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their indexes match the data model indexes
-        //TODO: Implement this
+        if (!await this.updateIndexes()) {
+            this.printError("Error while attempting to update indexes:\n"+JSON.stringify(this.errorInfo,null,2));
+            process.exit(0);
+        } else {
+            dxUtils.outputFormattedLog("Indexes up to date!",this.commandLineSubHeadingFormatting);
+        }
 
         // 5. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their relationships match the data model relationships. Here we either create new
@@ -379,6 +384,21 @@ class DivbloxDatabaseSync {
             }
         }
         console.log(updatedTables.length+" tables were updated");
+        return true;
+    }
+    async updateIndexes() {
+        this.startNewCommandLineSection("Update indexes");
+        for (const entityName of Object.keys(this.dataModel)) {
+            const moduleName = this.dataModel[entityName]["module"];
+            const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName, "_");
+            const indexCheckResult = await this.databaseConnector.queryDB("SHOW INDEX FROM "+tableName, moduleName);
+            console.dir(indexCheckResult);
+        }
+        /*ALTER TABLE `example_entity_one` ADD INDEX `exampleEntityOne_exampleOneBigInt` (`example_one_big_int`) USING BTREE;*/
+        /*ALTER TABLE `example_entity_one` ADD UNIQUE `test` (`id`) USING BTREE;*/
+        /*ALTER TABLE `example_entity_one` ADD SPATIAL `test2` (`example_one_big_int`); ONLY ON GEOMETRICAL FIELDS*/
+        /*ALTER TABLE `example_entity_one` ADD FULLTEXT `test2` (`example_one_text`);*/
+        //TODO: Finish this
         return true;
     }
 }
