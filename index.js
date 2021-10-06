@@ -135,6 +135,7 @@ class DivbloxDatabaseSync {
         // Update tables (excluding relationships) - IMPLEMENTED
         // Update table indexes
         // Update relationships
+        // Update locking constraint columns
 
         dxUtils.outputFormattedLog("Analyzing database...",this.commandLineSubHeadingFormatting);
         this.existingTables = await this.getDatabaseTables();
@@ -296,9 +297,11 @@ class DivbloxDatabaseSync {
         this.startNewCommandLineSection("Update existing tables");
         let updatedTableCount = 0;
         let sqlQuery = {};
+        for (const moduleName of Object.keys(this.databaseConfig)) {
+            sqlQuery[moduleName] = [];
+        }
         for (const entityName of Object.keys(this.dataModel)) {
             const moduleName = this.dataModel[entityName]["module"];
-            sqlQuery[moduleName] = [];
             const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName,"_");
             const tableColumns = await this.databaseConnector.queryDB("SHOW FULL COLUMNS FROM "+tableName,moduleName);
             let tableColumnsNormalized = {};
@@ -314,9 +317,9 @@ class DivbloxDatabaseSync {
                 if (columnAttributeName === "id") {
                     continue;
                 }
+
                 // Let's check for columns to drop
                 if (!expectedColumns.includes(columnName)) {
-                    console.log(columnName+" not in "+JSON.stringify(expectedColumns));
                     sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` DROP COLUMN '+tableColumn["Field"]+';');
                     continue;
                 }

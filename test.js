@@ -12,60 +12,99 @@ const dbConfig = {
 };
 
 const dataModel = {
-    "auditLogEntry": {
+    "exampleEntityOne": {
         "module": "main",
         "attributes": {
-            "entryTimeStamp": {
+            "exampleOneTimeStamp": {
                 "type": "datetime",
                 "lengthOrValues": null,
                 "default": "CURRENT_TIMESTAMP",
                 "allowNull": true
             },
-            "objectName": {
+            "exampleOneStringWithNull": {
                 "type": "varchar",
                 "lengthOrValues": 50,
                 "default": null,
                 "allowNull": true
             },
-            "modificationType": {
+            "exampleOneStringWithoutNull": {
                 "type": "varchar",
                 "lengthOrValues": 15,
                 "default": null,
-                "allowNull": true
+                "allowNull": false
             },
-            "userIdentifier": {
-                "type": "varchar",
-                "lengthOrValues": 150,
-                "default": null,
-                "allowNull": true
-            },
-            "objectId": {
+            "exampleOneBigInt": {
                 "type": "bigint",
                 "lengthOrValues": 20,
                 "default": null,
                 "allowNull": true
             },
-            "entryDetail": {
+            "exampleOneText": {
                 "type": "text",
                 "lengthOrValues": null,
-                "default": null,
-                "allowNull": true
-            },
-            "apiKey": {
-                "type": "varchar",
-                "lengthOrValues": 50,
                 "default": null,
                 "allowNull": true
             }
         },
         "indexes": [
             {
-                "indexName": "auditLogEntry_objectId",
+                "indexName": "exampleEntityOne_exampleOneBigInt",
                 "indexChoice": "index",
                 "type": "BTREE"
             }
         ],
         "relationships": {
+        },
+        "options": {
+            "enforceLockingConstraints": true
+        }
+    },
+    "exampleEntityTwo": {
+        "module": "main",
+        "attributes": {
+            "exampleTwoTimeStamp": {
+                "type": "datetime",
+                "lengthOrValues": null,
+                "default": "CURRENT_TIMESTAMP",
+                "allowNull": true
+            },
+            "exampleTwoStringWithNull": {
+                "type": "varchar",
+                "lengthOrValues": 50,
+                "default": null,
+                "allowNull": true
+            },
+            "exampleTwoStringWithoutNull": {
+                "type": "varchar",
+                "lengthOrValues": 15,
+                "default": null,
+                "allowNull": false
+            },
+            "exampleTwoBigInt": {
+                "type": "bigint",
+                "lengthOrValues": 20,
+                "default": null,
+                "allowNull": true
+            },
+            "exampleTwoText": {
+                "type": "text",
+                "lengthOrValues": null,
+                "default": null,
+                "allowNull": true
+            }
+        },
+        "indexes": [
+            {
+                "indexName": "exampleEntityTwo_exampleTwoBigInt",
+                "indexChoice": "index",
+                "type": "BTREE"
+            }
+        ],
+        "relationships": {
+            "exampleEntityOne":[
+                "relationshipOne",
+                "relationshipTwo"
+            ]
         },
         "options": {
             "enforceLockingConstraints": false
