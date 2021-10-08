@@ -45,6 +45,24 @@
         "indexName": "exampleEntityOne_exampleOneBigInt",
         "indexChoice": "index",
         "type": "BTREE"
+      },
+      {
+        "attribute": "exampleOneStringWithoutNull",
+        "indexName": "exampleEntityOne_exampleOneStringWithoutNull",
+        "indexChoice": "unique",
+        "type": "BTREE"
+      },
+      {
+        "attribute": "exampleOneGeometry",
+        "indexName": "exampleEntityOne_exampleOneGeometry",
+        "indexChoice": "spatial",
+        "type": "BTREE"
+      },
+      {
+        "attribute": "exampleOneText",
+        "indexName": "exampleEntityOne_exampleOneText",
+        "indexChoice": "fulltext",
+        "type": "BTREE"
       }
     ],
     "relationships": {

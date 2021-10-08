@@ -1,6 +1,7 @@
 const dxDbConnector = require('dx-db-connector');
 const dxUtils = require('dx-utils');
-
+//TODO: Allow for specifying how to deal with case in the database. Currently forcing lowercase with _ separator
+//TODO: Add to integrity check that database is InnoDB. InnoDB will be a requirement and limitation
 class DivbloxDatabaseSync {
     constructor(dataModel = {}, databaseConfig = {}) {
         this.dataModel = dataModel;
@@ -63,7 +64,10 @@ class DivbloxDatabaseSync {
         const entityRelationships = this.dataModel[entityName]["relationships"];
         for (const entityRelationship of Object.keys(entityRelationships)) {
             for (const relationshipName of entityRelationships[entityRelationship]) {
-                entityRelationshipColumns.push(entityRelationship+"_"+relationshipName)   ;
+                const columnName = dxUtils.getCamelCaseSplittedToLowerCase(entityRelationship,"_")+
+                    "_"+
+                    dxUtils.getCamelCaseSplittedToLowerCase(relationshipName,"_")
+                entityRelationshipColumns.push(columnName);
             }
         }
         return entityRelationshipColumns;
@@ -103,6 +107,21 @@ class DivbloxDatabaseSync {
 
         return sql;
     }
+    getEntityRelationshipFromRelationshipColumn(entityName, relationshipColumnName) {
+        let entityRelationshipColumns = [];
+        const entityRelationships = this.dataModel[entityName]["relationships"];
+        for (const entityRelationship of Object.keys(entityRelationships)) {
+            for (const relationshipName of entityRelationships[entityRelationship]) {
+                const columnName = dxUtils.getCamelCaseSplittedToLowerCase(entityRelationship,"_")+
+                    "_"+
+                    dxUtils.getCamelCaseSplittedToLowerCase(relationshipName,"_")
+                if (columnName === relationshipColumnName) {
+                    return entityRelationship;
+                }
+            }
+        }
+        return null;
+    }
     //#endregion
 
     async syncDatabase() {
@@ -134,8 +153,8 @@ class DivbloxDatabaseSync {
         // Remove tables - IMPLEMENTED
         // Create tables - IMPLEMENTED
         // Update tables (excluding relationships) - IMPLEMENTED
-        // Update table indexes
-        // Update relationships
+        // Update table indexes - IMPLEMENTED
+        // Update relationships - IMPLEMENTED
         // Update locking constraint columns
 
         dxUtils.outputFormattedLog("Analyzing database...",this.commandLineSubHeadingFormatting);
@@ -186,13 +205,18 @@ class DivbloxDatabaseSync {
         // 5. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their relationships match the data model relationships. Here we either create new
         //      foreign key constraints or drop existing ones where necessary
-        //TODO: Implement this
+        if (!await this.updateRelationships()) {
+            this.printError("Error while attempting to update relationships:\n"+JSON.stringify(this.errorInfo,null,2));
+            process.exit(0);
+        } else {
+            dxUtils.outputFormattedLog("Relationships up to date!",this.commandLineSubHeadingFormatting);
+        }
 
         process.exit(0);
     }
     async checkDataModelIntegrity() {
         //TODO: Ensure that the provided data model conforms to the expected standard. And return false if not.
-        this.startNewCommandLineSection("Data model integrity check");
+        this.startNewCommandLineSection("Data model integrity check. TO BE IMPLEMENTED");
         return true;
     }
     async disableForeignKeyChecks() {
@@ -315,6 +339,7 @@ class DivbloxDatabaseSync {
             const entityAttributes = this.dataModel[entityName]["attributes"];
             const expectedColumns = this.getEntityExpectedColumns(entityName);
             let attributesProcessed = [];
+            let relationshipsProcessed = [];
 
             for (const tableColumn of tableColumns) {
                 const columnName = tableColumn["Field"];
@@ -346,6 +371,15 @@ class DivbloxDatabaseSync {
                     "allowNull": allowNull
                 };
                 for (const columnOption of Object.keys(tableColumnsNormalized[tableColumn["Field"]])) {
+                    if (typeof entityAttributes[columnAttributeName] === "undefined") {
+                        // This must mean that the column is a foreign key column
+                        if (tableColumnsNormalized[tableColumn["Field"]]["type"].toLowerCase() !== "bigint") {
+                            // This column needs to be fixed. Somehow its type got changed
+                            sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` MODIFY COLUMN `'+columnName+'` BIGINT(20);');
+                        }
+                        relationshipsProcessed.push(columnName);
+                        break;
+                    }
                     const dataModelOption = ((columnOption === "lengthOrValues") && (entityAttributes[columnAttributeName][columnOption] !== null)) ?
                         entityAttributes[columnAttributeName][columnOption].toString() :
                         entityAttributes[columnAttributeName][columnOption];
@@ -370,6 +404,14 @@ class DivbloxDatabaseSync {
                     updatedTables.push(entityName);
                 }
             }
+            const entityRelationshipColumns = this.getEntityRelationshipColumns(entityName);
+            const relationshipColumnsToCreate = entityRelationshipColumns.filter(x => !relationshipsProcessed.includes(x));
+            for (const relationshipColumnToCreate of relationshipColumnsToCreate) {
+                sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` ADD COLUMN `'+relationshipColumnToCreate+'` BIGINT(20);');
+                if (!updatedTables.includes(entityName)) {
+                    updatedTables.push(entityName);
+                }
+            }
         }
 
         for (const moduleName of Object.keys(sqlQuery)) {
@@ -389,6 +431,7 @@ class DivbloxDatabaseSync {
     }
     async updateIndexes() {
         this.startNewCommandLineSection("Update indexes");
+        let updatedIndexes = {"added":0,"removed":0};
         for (const entityName of Object.keys(this.dataModel)) {
             const moduleName = this.dataModel[entityName]["module"];
             const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName, "_");
@@ -397,24 +440,50 @@ class DivbloxDatabaseSync {
             for (const index of indexCheckResult) {
                 existingIndexes.push(index['Key_name']);
             }
-            let expectedIndexes = [];
+            const expectedIndexes = this.getEntityRelationshipColumns(entityName);
             for (const indexObj of this.dataModel[entityName]["indexes"]) {
-                expectedIndexes.push(indexObj["indexName"]);
-                if (!existingIndexes.includes(indexObj["indexName"])) {
+                const indexName = dxUtils.getCamelCaseSplittedToLowerCase(indexObj["indexName"],"_");
+                expectedIndexes.push(indexName);
+                if (!existingIndexes.includes(indexName)) {
                     // Let's add this index
-                    console.log("Adding index '"+indexObj["indexName"]+"' on '"+entityName+"'...");
                     const keyColumn = dxUtils.getCamelCaseSplittedToLowerCase(indexObj["attribute"],"_");
                     switch (indexObj["indexChoice"].toLowerCase()) {
                         case 'index':
                             const indexAddResult =
                                 await this.databaseConnector.queryDB(
-                                    "ALTER TABLE `"+tableName+"` ADD INDEX `"+indexObj["indexName"]+"` (`"+keyColumn+"`) USING "+indexObj["type"]+";", moduleName);
+                                    "ALTER TABLE `"+tableName+"` ADD INDEX `"+indexName+"` (`"+keyColumn+"`) USING "+indexObj["type"]+";", moduleName);
                             if (typeof indexAddResult["error"] !== "undefined") {
                                 this.errorInfo.push(indexAddResult["error"])
                                 return false;
                             }
                             break;
-                        //TODO: Finish this. Examples below
+                        case 'unique':
+                            const uniqueAddResult =
+                                await this.databaseConnector.queryDB(
+                                    "ALTER TABLE `"+tableName+"` ADD UNIQUE `"+indexName+"` (`"+keyColumn+"`) USING "+indexObj["type"]+";", moduleName);
+                            if (typeof uniqueAddResult["error"] !== "undefined") {
+                                this.errorInfo.push(uniqueAddResult["error"])
+                                return false;
+                            }
+                            break;
+                        case 'spatial':
+                            const spatialAddResult =
+                                await this.databaseConnector.queryDB(
+                                    "ALTER TABLE `"+tableName+"` ADD SPATIAL `"+indexName+"` (`"+keyColumn+"`)", moduleName);
+                            if (typeof spatialAddResult["error"] !== "undefined") {
+                                this.errorInfo.push(spatialAddResult["error"])
+                                return false;
+                            }
+                            break;
+                        case 'fulltext':
+                            const fulltextAddResult =
+                                await this.databaseConnector.queryDB(
+                                    "ALTER TABLE `"+tableName+"` ADD FULLTEXT `"+indexName+"` (`"+keyColumn+"`)", moduleName);
+                            if (typeof fulltextAddResult["error"] !== "undefined") {
+                                this.errorInfo.push(fulltextAddResult["error"])
+                                return false;
+                            }
+                            break;
                         default:
                             this.errorInfo.push("Invalid index choice specified for " +
                             "'"+indexObj["indexName"]+"' on '"+entityName+"'. " +
@@ -422,6 +491,7 @@ class DivbloxDatabaseSync {
                             "Valid options: index|unique|fulltext|spatial");
                             return false;
                     }
+                    updatedIndexes.added++;
                 }
             }
 
@@ -431,17 +501,57 @@ class DivbloxDatabaseSync {
                 }
                 if (!expectedIndexes.includes(existingIndex)) {
                     const dropQuery = "ALTER TABLE `"+tableName+"` DROP INDEX `"+existingIndex+"`";
-                    console.log("Removing index "+existingIndex+"; Query: "+dropQuery+"\n Not in "+JSON.stringify(expectedIndexes));
-                    await this.databaseConnector.queryDB(dropQuery, moduleName);
+                    const dropResult = await this.databaseConnector.queryDB(dropQuery, moduleName);
+                    if (typeof dropResult["error"] !== "undefined") {
+                        this.errorInfo.push(dropResult["error"])
+                        return false;
+                    }
+                    updatedIndexes.removed++;
                 }
             }
-            console.dir(existingIndexes);
         }
-        /*ALTER TABLE `example_entity_one` ADD INDEX `exampleEntityOne_exampleOneBigInt` (`example_one_big_int`) USING BTREE;*/
-        /*ALTER TABLE `example_entity_one` ADD UNIQUE `test` (`id`) USING BTREE;*/
-        /*ALTER TABLE `example_entity_one` ADD SPATIAL `test2` (`example_one_big_int`); ONLY ON GEOMETRICAL FIELDS*/
-        /*ALTER TABLE `example_entity_one` ADD FULLTEXT `test2` (`example_one_text`);*/
-
+        console.log(updatedIndexes.added+" Indexes added. "+updatedIndexes.removed+" Indexes removed.");
+        return true;
+    }
+    async updateRelationships() {
+        this.startNewCommandLineSection("Update relationships");
+        let updatedRelationships = {"added":0,"removed":0};
+        for (const entityName of Object.keys(this.dataModel)) {
+            const moduleName = this.dataModel[entityName]["module"];
+            const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName, "_");
+            const schemaName = this.databaseConfig[moduleName]["database"];
+            const listForeignKeysQuery = "SELECT * " +
+                "FROM information_schema.REFERENTIAL_CONSTRAINTS " +
+                "WHERE TABLE_NAME = '"+tableName+"' ";
+            const listForeignKeysResult = await this.databaseConnector.queryDB(listForeignKeysQuery, moduleName);
+            let existingForeignKeys = [];
+            const entityRelationshipColumns = this.getEntityRelationshipColumns(entityName);
+            for (const foreignKeyResult of listForeignKeysResult) {
+                if (!entityRelationshipColumns.includes(foreignKeyResult.CONSTRAINT_NAME)) {
+                    const dropQuery = "ALTER TABLE `"+schemaName+"`.`"+tableName+"` DROP FOREIGN KEY "+foreignKeyResult.CONSTRAINT_NAME+";";
+                    const foreignKeyDeleteResult = await this.databaseConnector.queryDB(dropQuery, moduleName);
+                    if (typeof foreignKeyDeleteResult["error"] !== "undefined") {
+                        this.errorInfo.push("Could not execute query: "+foreignKeyDeleteResult["error"]);
+                        return false;
+                    }
+                    updatedRelationships.removed++;
+                } else {
+                    existingForeignKeys.push(foreignKeyResult.CONSTRAINT_NAME);
+                }
+            }
+            const foreignKeysToCreate = entityRelationshipColumns.filter(x => !existingForeignKeys.includes(x));
+            for (const foreignKeyToCreate of foreignKeysToCreate) {
+                const entityRelationship = this.getEntityRelationshipFromRelationshipColumn(entityName, foreignKeyToCreate);
+                const createQuery = "ALTER TABLE `"+tableName+"` ADD CONSTRAINT `"+foreignKeyToCreate+"` FOREIGN KEY (`"+foreignKeyToCreate+"`) REFERENCES `"+dxUtils.getCamelCaseSplittedToLowerCase(entityRelationship,"_")+"`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;"
+                const createResult = await this.databaseConnector.queryDB(createQuery, moduleName);
+                if (typeof createResult["error"] !== "undefined") {
+                    this.errorInfo.push("Could not execute query: "+createResult["error"]);
+                    return false;
+                }
+                updatedRelationships.added++;
+            }
+        }
+        console.log(updatedRelationships.added+" Relationships added. "+updatedRelationships.removed+" Relationships removed.");
         return true;
     }
 }
