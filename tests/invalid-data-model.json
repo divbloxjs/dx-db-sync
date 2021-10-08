@@ -1,0 +1,27 @@
+{
+  "test": {
+    "module": "main",
+    "attributes": {
+      "test": {
+        "type": "datetime",
+        "lengthOrValues": null,
+        "default": "CURRENT_TIMESTAMP",
+        "allowNull": true
+      }
+    },
+    "indexes": [
+      {
+        "attribute": "test",
+        "indexName": "exampleEntityTwo_exampleTwoBigInt",
+        "indexChoice": "index",
+        "type": "BTREE"
+      }
+    ],
+    "relationships": {
+      "a":["1,2"]
+    },
+    "options": {
+      "enforceLockingConstraints": true
+    }
+  }
+}

@@ -1,7 +1,6 @@
 const dxDbConnector = require('dx-db-connector');
 const dxUtils = require('dx-utils');
 //TODO: Allow for specifying how to deal with case in the database. Currently forcing lowercase with _ separator
-//TODO: Add to integrity check that database is InnoDB. InnoDB will be a requirement and limitation
 //TODO: Add code docs
 class DivbloxDatabaseSync {
     constructor(dataModel = {}, databaseConfig = {}) {
@@ -158,15 +157,6 @@ class DivbloxDatabaseSync {
             dxUtils.outputFormattedLog("Data model integrity check succeeded!",this.commandLineSubHeadingFormatting);
         }
 
-        //TODO: Execute sync functions in order here
-        // Check data model integrity
-        // Remove tables - IMPLEMENTED
-        // Create tables - IMPLEMENTED
-        // Update tables (excluding relationships) - IMPLEMENTED
-        // Update table indexes - IMPLEMENTED
-        // Update relationships - IMPLEMENTED
-        // Update locking constraint columns - IMPLEMENTED
-
         dxUtils.outputFormattedLog("Analyzing database...",this.commandLineSubHeadingFormatting);
         this.existingTables = await this.getDatabaseTables();
         this.expectedTables = [];
@@ -225,8 +215,96 @@ class DivbloxDatabaseSync {
         process.exit(0);
     }
     async checkDataModelIntegrity() {
-        //TODO: Ensure that the provided data model conforms to the expected standard. And return false if not.
-        this.startNewCommandLineSection("Data model integrity check. TO BE IMPLEMENTED");
+        this.startNewCommandLineSection("Data model integrity check.");
+        const entities = this.dataModel;
+        if (entities.length === 0) {
+            this.errorInfo.push("Data model has no entities defined.");
+            return false;
+        }
+        const baseKeys = ["module","attributes","indexes","relationships","options"];
+        for (const entityName of Object.keys(entities)) {
+            const entityObj = entities[entityName];
+            for (const baseKey of baseKeys) {
+                if (typeof entityObj[baseKey] === "undefined") {
+                    this.errorInfo.push("Entity "+entityName+" has no "+baseKey+" definition.");
+                    return false;
+                }
+            }
+            const moduleName = entityObj["module"];
+            if (typeof this.databaseConfig[moduleName] === "undefined") {
+                this.errorInfo.push("Entity "+entityName+" has an invalid module name provided. '"+moduleName+"' is not defined in the database configuration");
+                return false;
+            }
+            const attributes = entityObj["attributes"];
+            if (attributes.length === 0) {
+                this.errorInfo.push("Entity "+entityName+" has no attributes provided.");
+                return false;
+            }
+            const expectedAttributeDefinition = {
+                    "type": "[MySQL column type]",
+                    "lengthOrValues": "[null|int|if type is enum, then comma separated values '1','2','3',...]",
+                    "default": "[value|null|CURRENT_TIMESTAMP]",
+                    "allowNull": "[true|false]"
+                };
+            for (const attributeName of Object.keys(attributes)) {
+                const attributeObj = attributes[attributeName];
+                const attributeConfigs = Object.keys(attributeObj);
+
+                if (JSON.stringify(attributeConfigs) !== JSON.stringify(Object.keys(expectedAttributeDefinition))) {
+                    this.errorInfo.push("Invalid attribute definition for '"+entityName+"' ('"+attributeName+"'). Expected: ")
+                    this.errorInfo.push(expectedAttributeDefinition);
+                    return false;
+                }
+            }
+            const expectedIndexesDefinition = {
+                "attribute": "[The attribute on which the index should be set]",
+                "indexName": "[The name of the index]",
+                "indexChoice": "[index|unique|spatial|text]",
+                "type": "[BTREE|HASH]"
+            };
+            if (typeof entityObj["indexes"] !== "object") {
+                this.errorInfo.push("Invalid index definition for '"+entityName+"'. Expected: ")
+                this.errorInfo.push(expectedIndexesDefinition);
+                return false;
+            }
+            for (const index of entityObj["indexes"]) {
+                if (JSON.stringify(Object.keys(index)) !== JSON.stringify(Object.keys(expectedIndexesDefinition))) {
+                    this.errorInfo.push("Invalid index definition for '"+entityName+"'. Expected: ")
+                    this.errorInfo.push(expectedIndexesDefinition);
+                    return false;
+                }
+            }
+            const expectedRelationshipDefinition = {
+                "relationshipEntity":[
+                    "relationshipOneName",
+                    "relationshipTwoName"
+                ]
+            }
+            for (const relationshipName of Object.keys(entityObj["relationships"])) {
+                if (typeof entityObj["relationships"][relationshipName] !== "object") {
+                    this.errorInfo.push("Invalid relationship definition for '"+entityName+"'. Expected: ")
+                    this.errorInfo.push(expectedRelationshipDefinition);
+                    return false;
+                }
+            }
+        }
+
+        for (const moduleName of Object.keys(this.databaseConfig)) {
+            const innoDbCheckResult = await this.databaseConnector.queryDB("SHOW ENGINES", moduleName);
+            if (typeof innoDbCheckResult["error"] !== "undefined") {
+                this.errorInfo.push("Could not check database engine. Error: ");
+                this.errorInfo.push(innoDbCheckResult["error"]);
+                return false;
+            }
+            for (const row of innoDbCheckResult) {
+                if (row["Engine"].toLowerCase() === 'innodb') {
+                    if (row["Support"].toLowerCase() !== "default") {
+                        this.errorInfo.push("The active database engine is NOT InnoDB. Cannot proceed.");
+                        return false;
+                    }
+                }
+            }
+        }
         return true;
     }
     async disableForeignKeyChecks() {
