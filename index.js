@@ -2,6 +2,7 @@ const dxDbConnector = require('dx-db-connector');
 const dxUtils = require('dx-utils');
 //TODO: Allow for specifying how to deal with case in the database. Currently forcing lowercase with _ separator
 //TODO: Add to integrity check that database is InnoDB. InnoDB will be a requirement and limitation
+//TODO: Add code docs
 class DivbloxDatabaseSync {
     constructor(dataModel = {}, databaseConfig = {}) {
         this.dataModel = dataModel;
@@ -59,6 +60,9 @@ class DivbloxDatabaseSync {
         }
         return entityModuleMapping;
     }
+    getLockingConstraintColumn(){
+        return "last_updated";
+    }
     getEntityRelationshipColumns(entityName) {
         let entityRelationshipColumns = [];
         const entityRelationships = this.dataModel[entityName]["relationships"];
@@ -79,6 +83,12 @@ class DivbloxDatabaseSync {
         }
         for (const relationshipColumn of this.getEntityRelationshipColumns(entityName)) {
             expectedColumns.push(dxUtils.getCamelCaseSplittedToLowerCase(relationshipColumn,"_"));
+        }
+        if ((typeof this.dataModel[entityName]["options"] !== "undefined") &&
+            (typeof this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== "undefined")) {
+            if (this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== false) {
+                expectedColumns.push(this.getLockingConstraintColumn());
+            }
         }
         return expectedColumns;
     }
@@ -155,7 +165,7 @@ class DivbloxDatabaseSync {
         // Update tables (excluding relationships) - IMPLEMENTED
         // Update table indexes - IMPLEMENTED
         // Update relationships - IMPLEMENTED
-        // Update locking constraint columns
+        // Update locking constraint columns - IMPLEMENTED
 
         dxUtils.outputFormattedLog("Analyzing database...",this.commandLineSubHeadingFormatting);
         this.existingTables = await this.getDatabaseTables();
@@ -372,12 +382,27 @@ class DivbloxDatabaseSync {
                 };
                 for (const columnOption of Object.keys(tableColumnsNormalized[tableColumn["Field"]])) {
                     if (typeof entityAttributes[columnAttributeName] === "undefined") {
-                        // This must mean that the column is a foreign key column
-                        if (tableColumnsNormalized[tableColumn["Field"]]["type"].toLowerCase() !== "bigint") {
-                            // This column needs to be fixed. Somehow its type got changed
-                            sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` MODIFY COLUMN `'+columnName+'` BIGINT(20);');
+                        if (columnName !== this.getLockingConstraintColumn()) {
+                            // This must mean that the column is a foreign key column
+                            if (tableColumnsNormalized[tableColumn["Field"]]["type"].toLowerCase() !== "bigint") {
+                                // This column needs to be fixed. Somehow its type got changed
+                                sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` MODIFY COLUMN `'+columnName+'` BIGINT(20);');
+                                if (!updatedTables.includes(entityName)) {
+                                    updatedTables.push(entityName);
+                                }
+                            }
+                            relationshipsProcessed.push(columnName);
+                        } else {
+                            // This is the locking constraint column
+                            if (tableColumnsNormalized[tableColumn["Field"]]["type"].toLowerCase() !== "datetime") {
+                                // This column needs to be fixed. Somehow its type got changed
+                                sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` MODIFY COLUMN `'+columnName+'` datetime DEFAULT CURRENT_TIMESTAMP;');
+                                if (!updatedTables.includes(entityName)) {
+                                    updatedTables.push(entityName);
+                                }
+                            }
+                            attributesProcessed.push(columnName);
                         }
-                        relationshipsProcessed.push(columnName);
                         break;
                     }
                     const dataModelOption = ((columnOption === "lengthOrValues") && (entityAttributes[columnAttributeName][columnOption] !== null)) ?
@@ -396,10 +421,22 @@ class DivbloxDatabaseSync {
             // Now, let's create any remaining new columns
             let entityAttributesArray = Object.keys(entityAttributes);
             entityAttributesArray.push("id");
+            if ((typeof this.dataModel[entityName]["options"] !== "undefined") &&
+                (typeof this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== "undefined")) {
+                if (this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== false) {
+                    entityAttributesArray.push(this.getLockingConstraintColumn());
+                }
+            }
             const columnsToCreate = entityAttributesArray.filter(x => !attributesProcessed.includes(x));
             for (const columnToCreate of columnsToCreate) {
                 const columnName = dxUtils.getCamelCaseSplittedToLowerCase(columnToCreate,"_");
-                sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` '+this.getAlterColumnSql(columnName, entityAttributes[columnToCreate], "ADD"));
+                const columnDataModelObject = columnToCreate === this.getLockingConstraintColumn() ? {
+                    "type": "datetime",
+                    "lengthOrValues": null,
+                    "default": "CURRENT_TIMESTAMP",
+                    "allowNull": false
+                } : entityAttributes[columnToCreate];
+                sqlQuery[moduleName].push('ALTER TABLE `'+tableName+'` '+this.getAlterColumnSql(columnName, columnDataModelObject, "ADD"));
                 if (!updatedTables.includes(entityName)) {
                     updatedTables.push(entityName);
                 }
