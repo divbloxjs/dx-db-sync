@@ -1,20 +1,10 @@
 const dxDbSync = require("../index");
 const fs = require("fs");
 
-const dbConfig = {
-    "main": {
-        "host": "localhost",
-        "user": "dbuser",
-        "password": "123",
-        "database": "local_dx_db",
-        "port": 3306,
-        "ssl": false
-    }
-};
-
 async function testFunction() {
     const dataModel = fs.readFileSync('tests/example-data-model.json','utf-8');
-    const dbSync = new dxDbSync(JSON.parse(dataModel), dbConfig);
+    const dataBaseConfig = fs.readFileSync('tests/database-config.json','utf-8');
+    const dbSync = new dxDbSync(JSON.parse(dataModel), JSON.parse(dataBaseConfig),"PascalCase");
     await dbSync.syncDatabase();
 }
 

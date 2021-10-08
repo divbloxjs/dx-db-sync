@@ -3,7 +3,22 @@ const dxUtils = require('dx-utils');
 //TODO: Allow for specifying how to deal with case in the database. Currently forcing lowercase with _ separator
 //TODO: Add code docs
 class DivbloxDatabaseSync {
-    constructor(dataModel = {}, databaseConfig = {}) {
+    /**
+     *
+     * @param {*} dataModel The data model json that will be used to synchronize the database. An example can be found
+     * in the tests folder "example-data-model.json"
+     * @param {*} databaseConfig The database connection configuration. An example can be found in the tests folder
+     * "database-configuration"
+     * @param {string} databaseCaseImplementation Options: lowercase|PascalCase|CamelCase
+     * If lowercase is selected, all table and column names will be converted to lowercase, splitted by an underscore _
+     * If PascalCase is selected, all table and column names will be converted to Pascal case, assuming an underscore as
+     * splitter in the data model
+     * If CamelCase is selected, all table and column names will be converted to Camel case, assuming an underscore as
+     * splitter in the data model
+     * NOTE: Either Pascal or Camel case will require the database to be set up in such a manner to support this. It is
+     * therefore recommended to stick to lowercase
+     */
+    constructor(dataModel = {}, databaseConfig = {}, databaseCaseImplementation = "lowercase") {
         this.dataModel = dataModel;
         this.databaseConfig = databaseConfig;
         this.databaseConnector = new dxDbConnector(this.databaseConfig);
@@ -12,6 +27,7 @@ class DivbloxDatabaseSync {
         this.commandLineWarningFormatting = dxUtils.commandLineColors.foregroundYellow;
         this.errorInfo = [];
         this.foreignKeyChecksDisabled = false;
+        this.databaseCaseImplementation = databaseCaseImplementation;
     }
 
     //#region Helpers
@@ -27,6 +43,25 @@ class DivbloxDatabaseSync {
     printError(message = '') {
         dxUtils.outputFormattedLog(message,
             dxUtils.commandLineColors.foregroundRed);
+    }
+    getCaseNormalizedString(inputString = '') {
+        switch (this.databaseCaseImplementation.toLowerCase()) {
+            case "lowercase": return dxUtils.getCamelCaseSplittedToLowerCase(inputString, "_");
+            case "pascalcase": return dxUtils.convertLowerCaseToPascalCase(inputString, "_");
+            case "camelcase": return dxUtils.convertLowerCaseToCamelCase(inputString, "_");
+            default: return dxUtils.getCamelCaseSplittedToLowerCase(inputString, "_");
+        }
+    }
+    getCaseDenormalizedString(inputString = '') {
+        let preparedString = inputString;
+        switch (this.databaseCaseImplementation.toLowerCase()) {
+            case "lowercase": return dxUtils.convertLowerCaseToCamelCase(inputString, "_");
+            case "pascalcase": preparedString = dxUtils.getCamelCaseSplittedToLowerCase(inputString,"_");
+                return dxUtils.convertLowerCaseToPascalCase(preparedString, "_");
+            case "camelcase": preparedString = dxUtils.getCamelCaseSplittedToLowerCase(inputString,"_");
+                return dxUtils.convertLowerCaseToCamelCase(preparedString, "_");
+            default: return dxUtils.convertLowerCaseToCamelCase(inputString, "_");
+        }
     }
     async getDatabaseTables() {
         let tables = {};
@@ -59,29 +94,75 @@ class DivbloxDatabaseSync {
         }
         return entityModuleMapping;
     }
-    getLockingConstraintColumn(){
-        return "last_updated";
+    getPrimaryKeyColumn() {
+        switch (this.databaseCaseImplementation.toLowerCase()) {
+            case "lowercase": return "id";
+            case "pascalcase": return "Id";
+            case "camelcase": return "id";
+            default: return "id";
+        }
+    }
+    getLockingConstraintColumn() {
+        switch (this.databaseCaseImplementation.toLowerCase()) {
+            case "lowercase": return "last_updated";
+            case "pascalcase": return "LastUpdated";
+            case "camelcase": return "lastUpdated";
+            default: return "last_updated";
+        }
     }
     getEntityRelationshipColumns(entityName) {
         let entityRelationshipColumns = [];
         const entityRelationships = this.dataModel[entityName]["relationships"];
         for (const entityRelationship of Object.keys(entityRelationships)) {
             for (const relationshipName of entityRelationships[entityRelationship]) {
-                const columnName = dxUtils.getCamelCaseSplittedToLowerCase(entityRelationship,"_")+
-                    "_"+
-                    dxUtils.getCamelCaseSplittedToLowerCase(relationshipName,"_")
+                const relationshipPart = this.getCaseNormalizedString(entityRelationship);
+                const relationshipNamePart = this.getCaseNormalizedString(relationshipName);
+                let columnName = '';
+                switch (this.databaseCaseImplementation.toLowerCase()) {
+                    case "lowercase": columnName = relationshipPart+"_"+relationshipNamePart;
+                        break;
+                    case "pascalcase":
+                    case "camelcase": columnName = relationshipPart+relationshipNamePart;
+                        break;
+                    default: columnName = relationshipPart+"_"+relationshipNamePart;
+                }
+
                 entityRelationshipColumns.push(columnName);
             }
         }
         return entityRelationshipColumns;
     }
+    getEntityRelationshipFromRelationshipColumn(entityName, relationshipColumnName) {
+        let entityRelationshipColumns = [];
+        const entityRelationships = this.dataModel[entityName]["relationships"];
+        for (const entityRelationship of Object.keys(entityRelationships)) {
+            for (const relationshipName of entityRelationships[entityRelationship]) {
+                const relationshipPart = this.getCaseNormalizedString(entityRelationship);
+                const relationshipNamePart = this.getCaseNormalizedString(relationshipName);
+                let columnName = '';
+                switch (this.databaseCaseImplementation.toLowerCase()) {
+                    case "lowercase": columnName = relationshipPart+"_"+relationshipNamePart;
+                        break;
+                    case "pascalcase":
+                    case "camelcase": columnName = relationshipPart+relationshipNamePart;
+                        break;
+                    default: columnName = relationshipPart+"_"+relationshipNamePart;
+                }
+
+                if (columnName === relationshipColumnName) {
+                    return entityRelationship;
+                }
+            }
+        }
+        return null;
+    }
     getEntityExpectedColumns(entityName) {
-        let expectedColumns = ["id"];
+        let expectedColumns = [this.getPrimaryKeyColumn()];
         for (const attributeColumn of Object.keys(this.dataModel[entityName]["attributes"])) {
-            expectedColumns.push(dxUtils.getCamelCaseSplittedToLowerCase(attributeColumn,"_"));
+            expectedColumns.push(this.getCaseNormalizedString(attributeColumn));
         }
         for (const relationshipColumn of this.getEntityRelationshipColumns(entityName)) {
-            expectedColumns.push(dxUtils.getCamelCaseSplittedToLowerCase(relationshipColumn,"_"));
+            expectedColumns.push(this.getCaseNormalizedString(relationshipColumn));
         }
         if ((typeof this.dataModel[entityName]["options"] !== "undefined") &&
             (typeof this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== "undefined")) {
@@ -93,8 +174,8 @@ class DivbloxDatabaseSync {
     }
     getAlterColumnSql(columnName = '', columnDataModelObject = {}, operation = "MODIFY") {
         let sql = operation+' COLUMN '+columnName+' '+columnDataModelObject["type"];
-        if (columnName === "id") {
-            sql = operation+' COLUMN `id` BIGINT NOT NULL AUTO_INCREMENT FIRST, ADD PRIMARY KEY (`id`);';
+        if (columnName === this.getPrimaryKeyColumn()) {
+            sql = operation+' COLUMN `'+this.getPrimaryKeyColumn()+'` BIGINT NOT NULL AUTO_INCREMENT FIRST, ADD PRIMARY KEY (`'+this.getPrimaryKeyColumn()+'`);';
             return sql;
         }
         if (columnDataModelObject["lengthOrValues"] !== null) {
@@ -115,21 +196,6 @@ class DivbloxDatabaseSync {
         }
 
         return sql;
-    }
-    getEntityRelationshipFromRelationshipColumn(entityName, relationshipColumnName) {
-        let entityRelationshipColumns = [];
-        const entityRelationships = this.dataModel[entityName]["relationships"];
-        for (const entityRelationship of Object.keys(entityRelationships)) {
-            for (const relationshipName of entityRelationships[entityRelationship]) {
-                const columnName = dxUtils.getCamelCaseSplittedToLowerCase(entityRelationship,"_")+
-                    "_"+
-                    dxUtils.getCamelCaseSplittedToLowerCase(relationshipName,"_")
-                if (columnName === relationshipColumnName) {
-                    return entityRelationship;
-                }
-            }
-        }
-        return null;
     }
     //#endregion
 
@@ -161,7 +227,7 @@ class DivbloxDatabaseSync {
         this.existingTables = await this.getDatabaseTables();
         this.expectedTables = [];
         for (const expectedTable of Object.keys(this.dataModel)) {
-            this.expectedTables.push(dxUtils.getCamelCaseSplittedToLowerCase(expectedTable,"_"));
+            this.expectedTables.push(this.getCaseNormalizedString(expectedTable));
         }
         this.tablesToCreate = this.getTablesToCreate();
         this.tablesToRemove = this.getTablesToRemove();
@@ -400,9 +466,10 @@ class DivbloxDatabaseSync {
         }
         console.log(this.tablesToCreate.length+" new table(s) to create.");
         for (const tableName of this.tablesToCreate) {
-            const tableNameDataModel = dxUtils.convertLowerCaseToCamelCase(tableName,"_");
+            const tableNameDataModel = this.getCaseDenormalizedString(tableName);
+            console.log(tableNameDataModel+" "+tableName);
             const moduleName = this.dataModel[tableNameDataModel]["module"];
-            const createTableSql = 'CREATE TABLE `'+tableName+'` ( `id` BIGINT NOT NULL AUTO_INCREMENT , PRIMARY KEY (`id`));';
+            const createTableSql = 'CREATE TABLE `'+tableName+'` ( `'+this.getPrimaryKeyColumn()+'` BIGINT NOT NULL AUTO_INCREMENT , PRIMARY KEY (`'+this.getPrimaryKeyColumn()+'`));';
             const createResult = await this.databaseConnector.queryDB(createTableSql, moduleName);
             if (typeof createResult["error"] !== "undefined") {
                 this.errorInfo.push(createResult["error"]);
@@ -420,7 +487,7 @@ class DivbloxDatabaseSync {
         }
         for (const entityName of Object.keys(this.dataModel)) {
             const moduleName = this.dataModel[entityName]["module"];
-            const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName,"_");
+            const tableName = this.getCaseNormalizedString(entityName);
             const tableColumns = await this.databaseConnector.queryDB("SHOW FULL COLUMNS FROM "+tableName,moduleName);
             let tableColumnsNormalized = {};
 
@@ -433,7 +500,7 @@ class DivbloxDatabaseSync {
                 const columnName = tableColumn["Field"];
                 const columnAttributeName = dxUtils.convertLowerCaseToCamelCase(columnName,"_");
                 attributesProcessed.push(columnAttributeName);
-                if (columnAttributeName === "id") {
+                if (columnAttributeName === this.getPrimaryKeyColumn()) {
                     continue;
                 }
 
@@ -498,7 +565,7 @@ class DivbloxDatabaseSync {
 
             // Now, let's create any remaining new columns
             let entityAttributesArray = Object.keys(entityAttributes);
-            entityAttributesArray.push("id");
+            entityAttributesArray.push(this.getPrimaryKeyColumn());
             if ((typeof this.dataModel[entityName]["options"] !== "undefined") &&
                 (typeof this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== "undefined")) {
                 if (this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== false) {
@@ -507,7 +574,7 @@ class DivbloxDatabaseSync {
             }
             const columnsToCreate = entityAttributesArray.filter(x => !attributesProcessed.includes(x));
             for (const columnToCreate of columnsToCreate) {
-                const columnName = dxUtils.getCamelCaseSplittedToLowerCase(columnToCreate,"_");
+                const columnName = this.getCaseNormalizedString(columnToCreate);
                 const columnDataModelObject = columnToCreate === this.getLockingConstraintColumn() ? {
                     "type": "datetime",
                     "lengthOrValues": null,
@@ -549,7 +616,7 @@ class DivbloxDatabaseSync {
         let updatedIndexes = {"added":0,"removed":0};
         for (const entityName of Object.keys(this.dataModel)) {
             const moduleName = this.dataModel[entityName]["module"];
-            const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName, "_");
+            const tableName = this.getCaseNormalizedString(entityName);
             const indexCheckResult = await this.databaseConnector.queryDB("SHOW INDEX FROM "+tableName, moduleName);
             let existingIndexes = [];
             for (const index of indexCheckResult) {
@@ -557,11 +624,11 @@ class DivbloxDatabaseSync {
             }
             const expectedIndexes = this.getEntityRelationshipColumns(entityName);
             for (const indexObj of this.dataModel[entityName]["indexes"]) {
-                const indexName = dxUtils.getCamelCaseSplittedToLowerCase(indexObj["indexName"],"_");
+                const indexName = this.getCaseNormalizedString(indexObj["indexName"]);
                 expectedIndexes.push(indexName);
                 if (!existingIndexes.includes(indexName)) {
                     // Let's add this index
-                    const keyColumn = dxUtils.getCamelCaseSplittedToLowerCase(indexObj["attribute"],"_");
+                    const keyColumn = this.getCaseNormalizedString(indexObj["attribute"]);
                     switch (indexObj["indexChoice"].toLowerCase()) {
                         case 'index':
                             const indexAddResult =
@@ -633,7 +700,7 @@ class DivbloxDatabaseSync {
         let updatedRelationships = {"added":0,"removed":0};
         for (const entityName of Object.keys(this.dataModel)) {
             const moduleName = this.dataModel[entityName]["module"];
-            const tableName = dxUtils.getCamelCaseSplittedToLowerCase(entityName, "_");
+            const tableName = this.getCaseNormalizedString(entityName);
             const schemaName = this.databaseConfig[moduleName]["database"];
             const listForeignKeysQuery = "SELECT * " +
                 "FROM information_schema.REFERENTIAL_CONSTRAINTS " +
@@ -657,7 +724,7 @@ class DivbloxDatabaseSync {
             const foreignKeysToCreate = entityRelationshipColumns.filter(x => !existingForeignKeys.includes(x));
             for (const foreignKeyToCreate of foreignKeysToCreate) {
                 const entityRelationship = this.getEntityRelationshipFromRelationshipColumn(entityName, foreignKeyToCreate);
-                const createQuery = "ALTER TABLE `"+tableName+"` ADD CONSTRAINT `"+foreignKeyToCreate+"` FOREIGN KEY (`"+foreignKeyToCreate+"`) REFERENCES `"+dxUtils.getCamelCaseSplittedToLowerCase(entityRelationship,"_")+"`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;"
+                const createQuery = "ALTER TABLE `"+tableName+"` ADD CONSTRAINT `"+foreignKeyToCreate+"` FOREIGN KEY (`"+foreignKeyToCreate+"`) REFERENCES `"+this.getCaseNormalizedString(entityRelationship)+"`(`"+this.getPrimaryKeyColumn()+"`) ON DELETE SET NULL ON UPDATE CASCADE;"
                 const createResult = await this.databaseConnector.queryDB(createQuery, moduleName);
                 if (typeof createResult["error"] !== "undefined") {
                     this.errorInfo.push("Could not execute query: "+createResult["error"]);
