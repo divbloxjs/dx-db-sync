@@ -45,19 +45,22 @@ class DivbloxDatabaseSync {
             dxUtils.commandLineColors.foregroundRed);
     }
     getCaseNormalizedString(inputString = '') {
+        let preparedString = inputString;
         switch (this.databaseCaseImplementation.toLowerCase()) {
             case "lowercase": return dxUtils.getCamelCaseSplittedToLowerCase(inputString, "_");
-            case "pascalcase": return dxUtils.convertLowerCaseToPascalCase(inputString, "_");
-            case "camelcase": return dxUtils.convertLowerCaseToCamelCase(inputString, "_");
+            case "pascalcase": preparedString = dxUtils.getCamelCaseSplittedToLowerCase(inputString,"_");
+                return dxUtils.convertLowerCaseToPascalCase(preparedString, "_");
+            case "camelcase": preparedString = dxUtils.getCamelCaseSplittedToLowerCase(inputString,"_");
+                return dxUtils.convertLowerCaseToCamelCase(preparedString, "_");
             default: return dxUtils.getCamelCaseSplittedToLowerCase(inputString, "_");
         }
     }
     getCaseDenormalizedString(inputString = '') {
+        // Since the data model expects camelCase, this function converts back to that
         let preparedString = inputString;
         switch (this.databaseCaseImplementation.toLowerCase()) {
             case "lowercase": return dxUtils.convertLowerCaseToCamelCase(inputString, "_");
-            case "pascalcase": preparedString = dxUtils.getCamelCaseSplittedToLowerCase(inputString,"_");
-                return dxUtils.convertLowerCaseToPascalCase(preparedString, "_");
+            case "pascalcase":
             case "camelcase": preparedString = dxUtils.getCamelCaseSplittedToLowerCase(inputString,"_");
                 return dxUtils.convertLowerCaseToCamelCase(preparedString, "_");
             default: return dxUtils.convertLowerCaseToCamelCase(inputString, "_");
@@ -465,6 +468,7 @@ class DivbloxDatabaseSync {
             return true;
         }
         console.log(this.tablesToCreate.length+" new table(s) to create.");
+        console.log(JSON.stringify(this.tablesToCreate));
         for (const tableName of this.tablesToCreate) {
             const tableNameDataModel = this.getCaseDenormalizedString(tableName);
             console.log(tableNameDataModel+" "+tableName);
