@@ -397,7 +397,9 @@ class DivbloxDatabaseSync {
             for (const index of indexCheckResult) {
                 existingIndexes.push(index['Key_name']);
             }
+            let expectedIndexes = [];
             for (const indexObj of this.dataModel[entityName]["indexes"]) {
+                expectedIndexes.push(indexObj["indexName"]);
                 if (!existingIndexes.includes(indexObj["indexName"])) {
                     // Let's add this index
                     console.log("Adding index '"+indexObj["indexName"]+"' on '"+entityName+"'...");
@@ -420,6 +422,17 @@ class DivbloxDatabaseSync {
                             "Valid options: index|unique|fulltext|spatial");
                             return false;
                     }
+                }
+            }
+
+            for (const existingIndex of existingIndexes) {
+                if (existingIndex.toLowerCase() === 'primary') {
+                    continue;
+                }
+                if (!expectedIndexes.includes(existingIndex)) {
+                    const dropQuery = "ALTER TABLE `"+tableName+"` DROP INDEX `"+existingIndex+"`";
+                    console.log("Removing index "+existingIndex+"; Query: "+dropQuery+"\n Not in "+JSON.stringify(expectedIndexes));
+                    await this.databaseConnector.queryDB(dropQuery, moduleName);
                 }
             }
             console.dir(existingIndexes);

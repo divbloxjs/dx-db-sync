@@ -31,6 +31,12 @@
         "lengthOrValues": null,
         "default": null,
         "allowNull": true
+      },
+      "exampleOneGeometry": {
+        "type": "geometry",
+        "lengthOrValues": null,
+        "default": null,
+        "allowNull": false
       }
     },
     "indexes": [
