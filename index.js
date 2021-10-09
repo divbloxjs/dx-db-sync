@@ -1,13 +1,19 @@
 const dxDbConnector = require('dx-db-connector');
 const dxUtils = require('dx-utils');
 //TODO: Add code docs
+/**
+ * DivbloxDatabaseSync is responsible for taking a data model object, an example of which can be found in the tests
+ * folder, and use it to modify a single database or multiple databases in order to align the database(s) with the given
+ * model.
+ */
 class DivbloxDatabaseSync {
     /**
-     *
-     * @param {*} dataModel The data model json that will be used to synchronize the database. An example can be found
+     * Basic initialization. Nothing special.
+     * @param {*} dataModel The data model object that will be used to synchronize the database. An example can be found
      * in the tests folder "example-data-model.json"
      * @param {*} databaseConfig The database connection configuration. An example can be found in the tests folder
-     * "database-configuration"
+     * "database-configuration". The database config can have multiple "modules", each module respresents a separate
+     * database that requires its own connection information
      * @param {string} databaseCaseImplementation Options: lowercase|PascalCase|CamelCase
      * If lowercase is selected, all table and column names will be converted to lowercase, splitted by an underscore _
      * If PascalCase is selected, all table and column names will be converted to Pascal case, assuming an underscore as
@@ -30,6 +36,10 @@ class DivbloxDatabaseSync {
     }
 
     //#region Helpers
+    /**
+     * Outputs a piece of text to the command line, formatting it to appear as a heading.
+     * @param sectionHeading The heading text to display
+     */
     startNewCommandLineSection(sectionHeading = "") {
         let lineText = '';
         for (let i=0;i<process.stdout.columns;i++) {
@@ -39,10 +49,22 @@ class DivbloxDatabaseSync {
         dxUtils.outputFormattedLog(sectionHeading,this.commandLineHeadingFormatting);
         dxUtils.outputFormattedLog(lineText,dxUtils.commandLineColors.foregroundCyan);
     }
+
+    /**
+     * Outputs a piece of text to the command line, formatting it to appear as an error.
+     * @param message The error text to display
+     */
     printError(message = '') {
         dxUtils.outputFormattedLog(message,
             dxUtils.commandLineColors.foregroundRed);
     }
+
+    /**
+     * Returns the given inputString, formatted to align with the case implementation specified when instantiating this
+     * class
+     * @param inputString The string to normalize
+     * @return {string} The normalized string
+     */
     getCaseNormalizedString(inputString = '') {
         let preparedString = inputString;
         switch (this.databaseCaseImplementation.toLowerCase()) {
@@ -54,6 +76,12 @@ class DivbloxDatabaseSync {
             default: return dxUtils.getCamelCaseSplittedToLowerCase(inputString, "_");
         }
     }
+    /**
+     * Returns the given inputString, formatted back to camelCase. This is because it is expected that a divblox data
+     * model is ALWAYS defined using camelCase
+     * @param inputString The string to denormalize
+     * @return {string} The denormalized string
+     */
     getCaseDenormalizedString(inputString = '') {
         // Since the data model expects camelCase, this function converts back to that
         let preparedString = inputString;
@@ -65,6 +93,11 @@ class DivbloxDatabaseSync {
             default: return dxUtils.convertLowerCaseToCamelCase(inputString, "_");
         }
     }
+
+    /**
+     * Returns the tables that are currently in the database
+     * @return {Promise<{}>} Returns the name and type of each table
+     */
     async getDatabaseTables() {
         let tables = {};
         for (const moduleName of Object.keys(this.databaseConfig)) {
@@ -77,14 +110,30 @@ class DivbloxDatabaseSync {
         }
         return tables;
     }
+
+    /**
+     * Determines which tables, defined as entities in the data model, should be newly created in the database
+     * @return {*[]} An array of table names to create
+     */
     getTablesToCreate() {
         const existingTablesArray = Object.keys(this.existingTables);
         return this.expectedTables.filter(x => !existingTablesArray.includes(x));
     }
+
+    /**
+     * Determines which tables should be removed from the database. These are tables that are not defined as entities in
+     * the given data model
+     * @return {*[]} An array of table names to remove
+     */
     getTablesToRemove() {
         const existingTablesArray = Object.keys(this.existingTables);
         return existingTablesArray.filter(x => !this.expectedTables.includes(x));
     }
+
+    /**
+     * Returns a an array for each defined module that contains the entities for that module
+     * @return {{}} Each key will be a module. Each value will be an array of entity names
+     */
     getEntityModuleMapping() {
         let entityModuleMapping = {};
         for (const moduleName of Object.keys(this.databaseConfig)) {
@@ -96,6 +145,13 @@ class DivbloxDatabaseSync {
         }
         return entityModuleMapping;
     }
+
+    /**
+     * Returns a an array for each defined module that contains the tables for that module. The difference between
+     * entity and tables names is that entity names are ALWAYS camelCase, while table names will conform to the case
+     * provided when instantiating this class
+     * @return {{}} Each key will be a module. Each value will be an array of table names
+     */
     getTableModuleMapping() {
         let tableModuleMapping = {};
         for (const moduleName of Object.keys(this.databaseConfig)) {
@@ -107,6 +163,12 @@ class DivbloxDatabaseSync {
         }
         return tableModuleMapping;
     }
+
+    /**
+     * A wrapper function that returns the "id" column, formatted to the correct case, that is used as the primary key
+     * column for all tables
+     * @return {string} Either "id" or "Id"
+     */
     getPrimaryKeyColumn() {
         switch (this.databaseCaseImplementation.toLowerCase()) {
             case "lowercase": return "id";
@@ -115,6 +177,13 @@ class DivbloxDatabaseSync {
             default: return "id";
         }
     }
+
+    /**
+     * Divblox supports logic in its built-in ORM that determines whether a locking constraint is in place when
+     * attempting to update a specific table. A column "lastUpdated|LastUpdated|last_updated" is used to log when last
+     * a given table was updated to determine whether a locking constraint should be applied.
+     * @return {string} Either "lastUpdated", "LastUpdated" or "last_updated"
+     */
     getLockingConstraintColumn() {
         switch (this.databaseCaseImplementation.toLowerCase()) {
             case "lowercase": return "last_updated";
@@ -123,6 +192,12 @@ class DivbloxDatabaseSync {
             default: return "last_updated";
         }
     }
+
+    /**
+     * Returns the columns that will be created in the database to represent the relationships for the given entity
+     * @param entityName The name of the entity for which to determine relationship columns
+     * @return {*[]} An array of column names
+     */
     getEntityRelationshipColumns(entityName) {
         let entityRelationshipColumns = [];
         const entityRelationships = this.dataModel[entityName]["relationships"];
@@ -145,6 +220,13 @@ class DivbloxDatabaseSync {
         }
         return entityRelationshipColumns;
     }
+
+    /**
+     * Determines the relationship, as defined in the data model from the given column name
+     * @param entityName The name of the entity for which to determine the defined relationship
+     * @param relationshipColumnName The column name in the database that represents the relationship
+     * @return {string|null} The name of the relationship as defined in the data model
+     */
     getEntityRelationshipFromRelationshipColumn(entityName, relationshipColumnName) {
         let entityRelationshipColumns = [];
         const entityRelationships = this.dataModel[entityName]["relationships"];
@@ -169,6 +251,12 @@ class DivbloxDatabaseSync {
         }
         return null;
     }
+
+    /**
+     * Returns the names of the table columns expected for a given entity
+     * @param entityName The name of the entity
+     * @return {string[]} An array of column names
+     */
     getEntityExpectedColumns(entityName) {
         let expectedColumns = [this.getPrimaryKeyColumn()];
         for (const attributeColumn of Object.keys(this.dataModel[entityName]["attributes"])) {
@@ -185,6 +273,19 @@ class DivbloxDatabaseSync {
         }
         return expectedColumns;
     }
+
+    //TODO: Complete the below
+    /**
+     * A utility function that returns the sql to alter a table based on the data provided
+     * @param {string} columnName The name of the column to alter
+     * @param {*} columnDataModelObject An object containing information regarding the make-up of the column
+     * @param {string} columnDataModelObject.type The type of the column
+     * @param {string} columnDataModelObject.lengthOrValues The type of the column
+     * @param {string} columnDataModelObject.default The type of the column
+     * @param {boolean} columnDataModelObject.allowNull Whether to allow null or not for the column
+     * @param {string} operation "ADD|MODIFY"
+     * @return {string} The sql alter code
+     */
     getAlterColumnSql(columnName = '', columnDataModelObject = {}, operation = "MODIFY") {
         let sql = operation+' COLUMN '+columnName+' '+columnDataModelObject["type"];
         if (columnName === this.getPrimaryKeyColumn()) {
