@@ -1,6 +1,5 @@
 const dxDbConnector = require('dx-db-connector');
 const dxUtils = require('dx-utils');
-//TODO: Allow for specifying how to deal with case in the database. Currently forcing lowercase with _ separator
 //TODO: Add code docs
 class DivbloxDatabaseSync {
     /**
@@ -96,6 +95,17 @@ class DivbloxDatabaseSync {
             entityModuleMapping[moduleName].push(entityName);
         }
         return entityModuleMapping;
+    }
+    getTableModuleMapping() {
+        let tableModuleMapping = {};
+        for (const moduleName of Object.keys(this.databaseConfig)) {
+            tableModuleMapping[moduleName] = [];
+        }
+        for (const entityName of Object.keys(this.dataModel)) {
+            const moduleName = this.dataModel[entityName].module;
+            tableModuleMapping[moduleName].push(this.getCaseNormalizedString(entityName));
+        }
+        return tableModuleMapping;
     }
     getPrimaryKeyColumn() {
         switch (this.databaseCaseImplementation.toLowerCase()) {
@@ -425,18 +435,24 @@ class DivbloxDatabaseSync {
         return true;
     }
     async removeTablesRecursive(mustConfirm = true) {
-        const entityModuleMapping = this.getEntityModuleMapping();
+        const tableModuleMapping = this.getTableModuleMapping();
         if (!this.foreignKeyChecksDisabled) {
             await this.disableForeignKeyChecks();
         }
         if (!mustConfirm) {
             // Not going to be recursive. Just a single call to drop all relevant tables
             for (const moduleName of Object.keys(this.databaseConfig)) {
-                if ((typeof entityModuleMapping[moduleName] !== undefined) &&
-                    (entityModuleMapping[moduleName].length > 0)) {
-                    const tablesToDrop = this.tablesToRemove.filter(x => !entityModuleMapping[moduleName].includes(x));
+                if ((typeof tableModuleMapping[moduleName] !== undefined) &&
+                    (tableModuleMapping[moduleName].length > 0)) {
+                    const tablesToDrop = this.tablesToRemove.filter(x => !tableModuleMapping[moduleName].includes(x));
+                    console.dir(this.tablesToRemove);
+                    console.dir(tablesToDrop);
                     const tablesToDropStr = tablesToDrop.join(",");
                     const queryResult = await this.databaseConnector.queryDB("DROP TABLE if exists "+tablesToDropStr, moduleName);
+                    if (typeof queryResult["error"] !== "undefined") {
+                        dxUtils.outputFormattedLog("Error dropping tables '"+tablesToDropStr+"':",this.commandLineWarningFormatting);
+                        dxUtils.outputFormattedLog(queryResult["error"],this.commandLineWarningFormatting);
+                    }
                 }
             }
         } else {
@@ -502,7 +518,7 @@ class DivbloxDatabaseSync {
 
             for (const tableColumn of tableColumns) {
                 const columnName = tableColumn["Field"];
-                const columnAttributeName = dxUtils.convertLowerCaseToCamelCase(columnName,"_");
+                const columnAttributeName = this.getCaseDenormalizedString(columnName);
                 attributesProcessed.push(columnAttributeName);
                 if (columnAttributeName === this.getPrimaryKeyColumn()) {
                     continue;
@@ -569,17 +585,17 @@ class DivbloxDatabaseSync {
 
             // Now, let's create any remaining new columns
             let entityAttributesArray = Object.keys(entityAttributes);
-            entityAttributesArray.push(this.getPrimaryKeyColumn());
+            entityAttributesArray.push(this.getCaseDenormalizedString(this.getPrimaryKeyColumn()));
             if ((typeof this.dataModel[entityName]["options"] !== "undefined") &&
                 (typeof this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== "undefined")) {
                 if (this.dataModel[entityName]["options"]["enforceLockingConstraints"] !== false) {
-                    entityAttributesArray.push(this.getLockingConstraintColumn());
+                    entityAttributesArray.push(this.getCaseDenormalizedString(this.getLockingConstraintColumn()));
                 }
             }
             const columnsToCreate = entityAttributesArray.filter(x => !attributesProcessed.includes(x));
             for (const columnToCreate of columnsToCreate) {
                 const columnName = this.getCaseNormalizedString(columnToCreate);
-                const columnDataModelObject = columnToCreate === this.getLockingConstraintColumn() ? {
+                const columnDataModelObject = columnToCreate === this.getCaseDenormalizedString(this.getLockingConstraintColumn()) ? {
                     "type": "datetime",
                     "lengthOrValues": null,
                     "default": "CURRENT_TIMESTAMP",
