@@ -7,6 +7,7 @@ const dxUtils = require('dx-utils');
  * model.
  */
 class DivbloxDatabaseSync {
+
     /**
      * Basic initialization. Nothing special.
      * @param {*} dataModel The data model object that will be used to synchronize the database. An example can be found
@@ -45,6 +46,7 @@ class DivbloxDatabaseSync {
         for (let i=0;i<process.stdout.columns;i++) {
             lineText += '-';
         }
+
         dxUtils.outputFormattedLog(lineText,dxUtils.commandLineColors.foregroundCyan);
         dxUtils.outputFormattedLog(sectionHeading,this.commandLineHeadingFormatting);
         dxUtils.outputFormattedLog(lineText,dxUtils.commandLineColors.foregroundCyan);
@@ -96,6 +98,28 @@ class DivbloxDatabaseSync {
     }
 
     /**
+     * A helper function that disables foreign key checks on the database
+     * @return {Promise<void>}
+     */
+    async disableForeignKeyChecks() {
+        for (const moduleName of Object.keys(this.databaseConfig)) {
+            await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 0", moduleName);
+        }
+        this.foreignKeyChecksDisabled = true;
+    }
+
+    /**
+     * A helper function that enables foreign key checks on the database
+     * @return {Promise<void>}
+     */
+    async restoreForeignKeyChecks() {
+        for (const moduleName of Object.keys(this.databaseConfig)) {
+            await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 1", moduleName);
+        }
+        this.foreignKeyChecksDisabled = false;
+    }
+
+    /**
      * Returns the tables that are currently in the database
      * @return {Promise<{}>} Returns the name and type of each table
      */
@@ -104,6 +128,7 @@ class DivbloxDatabaseSync {
         for (const moduleName of Object.keys(this.databaseConfig)) {
             const moduleTables = await this.databaseConnector.queryDB("show full tables", moduleName);
             const databaseName = this.databaseConfig[moduleName]["database"];
+
             for (let i=0; i < moduleTables.length; i++) {
                 const dataPacket = moduleTables[i];
                 tables[dataPacket["Tables_in_"+databaseName]] = dataPacket["Table_type"];
@@ -142,7 +167,7 @@ class DivbloxDatabaseSync {
 
     /**
      * Returns a an array for each defined module that contains the entities for that module
-     * @return {{}} Each key will be a module. Each value will be an array of entity names
+     * @return {{}} Each key will be a module name. Each value will be an array of entity names
      */
     getEntityModuleMapping() {
         let entityModuleMapping = {};
@@ -163,7 +188,7 @@ class DivbloxDatabaseSync {
      * Returns a an array for each defined module that contains the tables for that module. The difference between
      * entity and tables names is that entity names are ALWAYS camelCase, while table names will conform to the case
      * provided when instantiating this class
-     * @return {{}} Each key will be a module. Each value will be an array of table names
+     * @return {{}} Each key will be a module name. Each value will be an array of table names
      */
     getTableModuleMapping() {
         let tableModuleMapping = {};
@@ -551,28 +576,6 @@ class DivbloxDatabaseSync {
             }
         }
         return true;
-    }
-
-    /**
-     * A helper function that disables foreign key checks on the database
-     * @return {Promise<void>}
-     */
-    async disableForeignKeyChecks() {
-        for (const moduleName of Object.keys(this.databaseConfig)) {
-            await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 0", moduleName);
-        }
-        this.foreignKeyChecksDisabled = true;
-    }
-
-    /**
-     * A helper function that enables foreign key checks on the database
-     * @return {Promise<void>}
-     */
-    async restoreForeignKeyChecks() {
-        for (const moduleName of Object.keys(this.databaseConfig)) {
-            await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 1", moduleName);
-        }
-        this.foreignKeyChecksDisabled = false;
     }
 
     /**
