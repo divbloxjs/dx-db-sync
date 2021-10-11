@@ -15,6 +15,9 @@ class DivbloxDatabaseSync {
      * @param {*} databaseConfig The database connection configuration. An example can be found in the tests folder
      * "database-configuration". The database config can have multiple "modules", each module respresents a separate
      * database that requires its own connection information
+     * @param {*} dxDatabaseConnectorInstance Optional. If provided, we will use this connector rather than creating a
+     * new one from the provided databaseConfig. This is useful if you want to use this class inside a Divblox project
+     * that already includes the dxDbConnector
      * @param {string} databaseCaseImplementation Options: lowercase|PascalCase|CamelCase
      * If lowercase is selected, all table and column names will be converted to lowercase, splitted by an underscore _
      * If PascalCase is selected, all table and column names will be converted to Pascal case, assuming an underscore as
@@ -24,10 +27,17 @@ class DivbloxDatabaseSync {
      * NOTE: Either Pascal or Camel case will require the database to be set up in such a manner to support this. It is
      * therefore recommended to stick to lowercase
      */
-    constructor(dataModel = {}, databaseConfig = {}, databaseCaseImplementation = "lowercase") {
+    constructor(dataModel = {},
+                databaseConfig = {},
+                dxDatabaseConnectorInstance = null,
+                databaseCaseImplementation = "lowercase") {
         this.dataModel = dataModel;
         this.databaseConfig = databaseConfig;
-        this.databaseConnector = new dxDbConnector(this.databaseConfig);
+        if (dxDatabaseConnectorInstance !== null) {
+            this.databaseConnector = dxDatabaseConnectorInstance;
+        } else {
+            this.databaseConnector = new dxDbConnector(this.databaseConfig);
+        }
         this.commandLineHeadingFormatting = dxUtils.commandLineColors.foregroundCyan+dxUtils.commandLineColors.bright;
         this.commandLineSubHeadingFormatting = dxUtils.commandLineColors.foregroundCyan+dxUtils.commandLineColors.dim;
         this.commandLineWarningFormatting = dxUtils.commandLineColors.foregroundYellow;
@@ -376,7 +386,7 @@ class DivbloxDatabaseSync {
      * 6. Loop through all the entities in the data model and update their corresponding database tables
      *    to ensure that their relationships match the data model relationships. Here we either create new
      *    foreign key constraints or drop existing ones where necessary
-     * @return {Promise<void>}
+     * @return {Promise<boolean>} Will return false if anything fails. Reasons will be printed to the console.
      */
     async syncDatabase() {
         this.startNewCommandLineSection("Starting database sync...");
@@ -389,19 +399,19 @@ class DivbloxDatabaseSync {
 
         if (answer.toString().toLowerCase() !== 'y') {
             this.printError('Database sync cancelled.');
-            return;
+            return false;
         }
 
         await this.databaseConnector.init();
         if (this.databaseConnector.getError().length > 0) {
             this.printError("Database init failed: "+JSON.stringify(this.databaseConnector.getError()));
-            return;
+            return false;
         }
 
         // 1. Check the integrity of the given data model to ensure we can perform the synchronization
         if (!await this.checkDataModelIntegrity()) {
             this.printError("Data model integrity check failed! Error:\n"+JSON.stringify(this.errorInfo,null,2));
-            process.exit(0);
+            return false;
         } else {
             dxUtils.outputFormattedLog("Data model integrity check succeeded!",this.commandLineSubHeadingFormatting);
         }
@@ -421,7 +431,7 @@ class DivbloxDatabaseSync {
         // 2. Remove tables that are not in the data model
         if (!await this.removeTables()) {
             this.printError("Error while attempting to remove tables:\n"+JSON.stringify(this.errorInfo,null,2));
-            process.exit(0);
+            return false;
         } else {
             dxUtils.outputFormattedLog("Database clean up completed!",this.commandLineSubHeadingFormatting);
         }
@@ -429,7 +439,7 @@ class DivbloxDatabaseSync {
         // 3. Create any new tables that are in the data model but not in the database
         if (!await this.createTables()) {
             this.printError("Error while attempting to create new tables:\n"+JSON.stringify(this.errorInfo,null,2));
-            process.exit(0);
+            return false;
         } else {
             dxUtils.outputFormattedLog("Table creation completed!",this.commandLineSubHeadingFormatting);
         }
@@ -438,7 +448,7 @@ class DivbloxDatabaseSync {
         //      to ensure that their columns match the data model attribute names and types
         if (!await this.updateTables()) {
             this.printError("Error while attempting to update tables:\n"+JSON.stringify(this.errorInfo,null,2));
-            process.exit(0);
+            return false;
         } else {
             dxUtils.outputFormattedLog("Table modification completed!",this.commandLineSubHeadingFormatting);
         }
@@ -447,7 +457,7 @@ class DivbloxDatabaseSync {
         //      to ensure that their indexes match the data model indexes
         if (!await this.updateIndexes()) {
             this.printError("Error while attempting to update indexes:\n"+JSON.stringify(this.errorInfo,null,2));
-            process.exit(0);
+            return false;
         } else {
             dxUtils.outputFormattedLog("Indexes up to date!",this.commandLineSubHeadingFormatting);
         }
@@ -457,12 +467,12 @@ class DivbloxDatabaseSync {
         //      foreign key constraints or drop existing ones where necessary
         if (!await this.updateRelationships()) {
             this.printError("Error while attempting to update relationships:\n"+JSON.stringify(this.errorInfo,null,2));
-            process.exit(0);
+            return false;
         } else {
             dxUtils.outputFormattedLog("Relationships up to date!",this.commandLineSubHeadingFormatting);
         }
 
-        process.exit(0);
+        return true;
     }
 
     /**
