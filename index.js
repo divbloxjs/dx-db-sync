@@ -329,7 +329,7 @@ class DivbloxDatabaseSync {
      * @param {string} columnDataModelObject.type The type of the column
      * @param {null|string|int} columnDataModelObject.lengthOrValues If column type is "enum" or "set", please enter the
      * values using this format: 'a','b','c'
-     * @param {null|string|int} columnDataModelObject.default The default value for the column
+     * @param {null|value|"CURRENT_TIMESTAMP"} columnDataModelObject.default The default value for the column
      * @param {boolean} columnDataModelObject.allowNull Whether to allow null or not for the column
      * @param {string} operation "ADD|MODIFY"
      * @return {string} The sql alter code
