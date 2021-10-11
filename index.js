@@ -35,6 +35,7 @@ class DivbloxDatabaseSync {
         this.databaseConfig = databaseConfig;
         if (dxDatabaseConnectorInstance !== null) {
             this.databaseConnector = dxDatabaseConnectorInstance;
+            this.databaseConfig = this.databaseConnector.databaseConfig;
         } else {
             this.databaseConnector = new dxDbConnector(this.databaseConfig);
         }
