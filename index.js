@@ -404,7 +404,8 @@ class DivbloxDatabaseSync {
 
         await this.databaseConnector.init();
         if (this.databaseConnector.getError().length > 0) {
-            this.printError("Database init failed: "+JSON.stringify(this.databaseConnector.getError()));
+            this.printError("Database init failed: ");
+            this.printError(this.databaseConnector.getError())
             return false;
         }
 
