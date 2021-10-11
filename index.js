@@ -474,6 +474,7 @@ class DivbloxDatabaseSync {
             dxUtils.outputFormattedLog("Relationships up to date!",this.commandLineSubHeadingFormatting);
         }
 
+        this.startNewCommandLineSection("Database sync completed successfully!");
         return true;
     }
 
