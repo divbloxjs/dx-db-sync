@@ -142,9 +142,11 @@ to foreign key constraints and columns in the database.
 
 #### Optional settings
 Each entity must have a property called "options". The value of this field must be an object containing additional options
-for the entity. A default option is "enforceLockingConstraints", which tells the Divblox database sync
-operation to add a column "lastUpdated" to the relevant database table. This column is used to apply and manage locking
-constraints when trying to update the relevant table.
+for the entity. The default options are:
+- "enforceLockingConstraints", which tells the Divblox database sync
+  operation to add a column "lastUpdated" to the relevant database table. This column is used to apply and manage locking
+  constraints when trying to update the relevant table.
+- "isAuditEnabled", which tells divbloxjs whether or not to audit interactions with this entity
 
 Additional options can be added here if you want to implement your own functionality on your Divblox data model.
 
@@ -153,7 +155,8 @@ Additional options can be added here if you want to implement your own functiona
   "entityOne": {
     ...
     "options": {
-      "enforceLockingConstraints": [true|false]
+      "enforceLockingConstraints": [true|false],
+      "isAuditEnabled": [true|false]
     }
   }
 }
@@ -182,7 +185,7 @@ Below is an example of a more complete, yet fictional data model:
       "exampleOneStringWithoutNull": {
         "type": "varchar",
         "lengthOrValues": 15,
-        "default": null,
+        "default": "",
         "allowNull": false
       },
       "exampleOneBigInt": {
@@ -196,12 +199,6 @@ Below is an example of a more complete, yet fictional data model:
         "lengthOrValues": null,
         "default": null,
         "allowNull": true
-      },
-      "exampleOneGeometry": {
-        "type": "geometry",
-        "lengthOrValues": null,
-        "default": null,
-        "allowNull": false
       }
     },
     "indexes": [
@@ -218,12 +215,6 @@ Below is an example of a more complete, yet fictional data model:
         "type": "BTREE"
       },
       {
-        "attribute": "exampleOneGeometry",
-        "indexName": "exampleEntityOne_exampleOneGeometry",
-        "indexChoice": "spatial",
-        "type": "BTREE"
-      },
-      {
         "attribute": "exampleOneText",
         "indexName": "exampleEntityOne_exampleOneText",
         "indexChoice": "fulltext",
@@ -233,7 +224,8 @@ Below is an example of a more complete, yet fictional data model:
     "relationships": {
     },
     "options": {
-      "enforceLockingConstraints": true
+      "enforceLockingConstraints": true,
+      "isAuditEnabled": true
     }
   },
   "exampleEntityTwo": {
@@ -285,7 +277,8 @@ Below is an example of a more complete, yet fictional data model:
       ]
     },
     "options": {
-      "enforceLockingConstraints": false
+      "enforceLockingConstraints": false,
+      "isAuditEnabled": true
     }
   }
 }
