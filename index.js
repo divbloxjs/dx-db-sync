@@ -456,6 +456,20 @@ class DivbloxDatabaseSync {
             dxUtils.outputFormattedLog("Table creation completed!",this.commandLineSubHeadingFormatting);
         }
 
+        // 4a. We call updateRelationships here to ensure any redundant foreign key constraints are removed before
+        //      attempting to update the tables. This sidesteps any constraint-related errors
+        if (!await this.updateRelationships(true)) {
+            this.printError("Error while attempting to remove relationships:\n"+JSON.stringify(this.errorInfo,null,2));
+
+            if (this.foreignKeyChecksDisabled) {
+                await this.restoreForeignKeyChecks();
+            }
+
+            return false;
+        } else {
+            dxUtils.outputFormattedLog("No redundant relationships!",this.commandLineSubHeadingFormatting);
+        }
+
         // 4. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their columns match the data model attribute names and types
         if (!await this.updateTables()) {
@@ -541,11 +555,11 @@ class DivbloxDatabaseSync {
             }
 
             const expectedAttributeDefinition = {
-                    "type": "[MySQL column type]",
-                    "lengthOrValues": "[null|int|if type is enum, then comma separated values '1','2','3',...]",
-                    "default": "[value|null|CURRENT_TIMESTAMP]",
-                    "allowNull": "[true|false]"
-                };
+                "type": "[MySQL column type]",
+                "lengthOrValues": "[null|int|if type is enum, then comma separated values '1','2','3',...]",
+                "default": "[value|null|CURRENT_TIMESTAMP]",
+                "allowNull": "[true|false]"
+            };
             for (const attributeName of Object.keys(attributes)) {
 
                 const attributeObj = attributes[attributeName];
@@ -989,9 +1003,9 @@ class DivbloxDatabaseSync {
                             break;
                         default:
                             this.errorInfo.push("Invalid index choice specified for " +
-                            "'"+indexObj["indexName"]+"' on '"+entityName+"'. " +
-                            "Provided: "+indexObj["indexChoice"]+"; " +
-                            "Valid options: index|unique|fulltext|spatial");
+                                "'"+indexObj["indexName"]+"' on '"+entityName+"'. " +
+                                "Provided: "+indexObj["indexChoice"]+"; " +
+                                "Valid options: index|unique|fulltext|spatial");
                             return false;
                     }
 
@@ -1031,8 +1045,12 @@ class DivbloxDatabaseSync {
      * @return {Promise<boolean>} True if all good, false otherwise. If false, the errorInfo array will be populated
      * with a relevant reason
      */
-    async updateRelationships() {
-        this.startNewCommandLineSection("Update relationships");
+    async updateRelationships(dropOnly = false) {
+        if (dropOnly) {
+            this.startNewCommandLineSection("Removing redundant relationships");
+        } else {
+            this.startNewCommandLineSection("Update relationships");
+        }
 
         if (!this.foreignKeyChecksDisabled) {
             await this.disableForeignKeyChecks();
@@ -1066,6 +1084,10 @@ class DivbloxDatabaseSync {
                 } else {
                     existingForeignKeys.push(foreignKeyResult.CONSTRAINT_NAME);
                 }
+            }
+
+            if (dropOnly) {
+                continue;
             }
 
             const foreignKeysToCreate = entityRelationshipColumns.filter(x => !existingForeignKeys.includes(x));
