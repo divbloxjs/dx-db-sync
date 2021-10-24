@@ -433,6 +433,11 @@ class DivbloxDatabaseSync {
         // 2. Remove tables that are not in the data model
         if (!await this.removeTables()) {
             this.printError("Error while attempting to remove tables:\n"+JSON.stringify(this.errorInfo,null,2));
+
+            if (this.foreignKeyChecksDisabled) {
+                await this.restoreForeignKeyChecks();
+            }
+
             return false;
         } else {
             dxUtils.outputFormattedLog("Database clean up completed!",this.commandLineSubHeadingFormatting);
@@ -441,6 +446,11 @@ class DivbloxDatabaseSync {
         // 3. Create any new tables that are in the data model but not in the database
         if (!await this.createTables()) {
             this.printError("Error while attempting to create new tables:\n"+JSON.stringify(this.errorInfo,null,2));
+
+            if (this.foreignKeyChecksDisabled) {
+                await this.restoreForeignKeyChecks();
+            }
+
             return false;
         } else {
             dxUtils.outputFormattedLog("Table creation completed!",this.commandLineSubHeadingFormatting);
@@ -450,6 +460,11 @@ class DivbloxDatabaseSync {
         //      to ensure that their columns match the data model attribute names and types
         if (!await this.updateTables()) {
             this.printError("Error while attempting to update tables:\n"+JSON.stringify(this.errorInfo,null,2));
+
+            if (this.foreignKeyChecksDisabled) {
+                await this.restoreForeignKeyChecks();
+            }
+
             return false;
         } else {
             dxUtils.outputFormattedLog("Table modification completed!",this.commandLineSubHeadingFormatting);
@@ -459,6 +474,11 @@ class DivbloxDatabaseSync {
         //      to ensure that their indexes match the data model indexes
         if (!await this.updateIndexes()) {
             this.printError("Error while attempting to update indexes:\n"+JSON.stringify(this.errorInfo,null,2));
+
+            if (this.foreignKeyChecksDisabled) {
+                await this.restoreForeignKeyChecks();
+            }
+
             return false;
         } else {
             dxUtils.outputFormattedLog("Indexes up to date!",this.commandLineSubHeadingFormatting);
@@ -469,6 +489,11 @@ class DivbloxDatabaseSync {
         //      foreign key constraints or drop existing ones where necessary
         if (!await this.updateRelationships()) {
             this.printError("Error while attempting to update relationships:\n"+JSON.stringify(this.errorInfo,null,2));
+
+            if (this.foreignKeyChecksDisabled) {
+                await this.restoreForeignKeyChecks();
+            }
+
             return false;
         } else {
             dxUtils.outputFormattedLog("Relationships up to date!",this.commandLineSubHeadingFormatting);
@@ -726,6 +751,10 @@ class DivbloxDatabaseSync {
     async updateTables() {
         this.startNewCommandLineSection("Update existing tables");
 
+        if (!this.foreignKeyChecksDisabled) {
+            await this.disableForeignKeyChecks();
+        }
+
         let updatedTables = [];
         let sqlQuery = {};
 
@@ -879,6 +908,10 @@ class DivbloxDatabaseSync {
 
         console.log(updatedTables.length+" tables were updated");
 
+        if (this.foreignKeyChecksDisabled) {
+            await this.restoreForeignKeyChecks();
+        }
+
         return true;
     }
 
@@ -889,6 +922,10 @@ class DivbloxDatabaseSync {
      */
     async updateIndexes() {
         this.startNewCommandLineSection("Update indexes");
+
+        if (!this.foreignKeyChecksDisabled) {
+            await this.disableForeignKeyChecks();
+        }
 
         let updatedIndexes = {"added":0,"removed":0};
 
@@ -971,7 +1008,7 @@ class DivbloxDatabaseSync {
                     const dropQuery = "ALTER TABLE `"+tableName+"` DROP INDEX `"+existingIndex+"`";
                     const dropResult = await this.databaseConnector.queryDB(dropQuery, moduleName);
                     if (typeof dropResult["error"] !== "undefined") {
-                        this.errorInfo.push(dropResult["error"])
+                        this.errorInfo.push(dropResult["error"]);
                         return false;
                     }
 
@@ -981,6 +1018,10 @@ class DivbloxDatabaseSync {
         }
 
         console.log(updatedIndexes.added+" Indexes added. "+updatedIndexes.removed+" Indexes removed.");
+
+        if (this.foreignKeyChecksDisabled) {
+            await this.restoreForeignKeyChecks();
+        }
 
         return true;
     }
@@ -992,6 +1033,10 @@ class DivbloxDatabaseSync {
      */
     async updateRelationships() {
         this.startNewCommandLineSection("Update relationships");
+
+        if (!this.foreignKeyChecksDisabled) {
+            await this.disableForeignKeyChecks();
+        }
 
         let updatedRelationships = {"added":0,"removed":0};
 
@@ -1039,6 +1084,10 @@ class DivbloxDatabaseSync {
         }
 
         console.log(updatedRelationships.added+" Relationships added. "+updatedRelationships.removed+" Relationships removed.");
+
+        if (this.foreignKeyChecksDisabled) {
+            await this.restoreForeignKeyChecks();
+        }
 
         return true;
     }
