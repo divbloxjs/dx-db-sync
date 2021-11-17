@@ -15,7 +15,7 @@
     "nodejs",
     "mysql"
   ],
-  "author": "Johan Griesel, johan@stratusolve.com (Stratusolve (Pty)",
+  "author": "Johan Griesel, johan@divblox.com - Divblox (Pty) Ltd",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/divbloxjs/dx-db-sync/issues"
