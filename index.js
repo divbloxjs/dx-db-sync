@@ -407,6 +407,7 @@ class DivbloxDatabaseSync {
 
     /**
      * The main synchronization function that orchestrates all the work. The following steps are performed:
+     * @param {boolean} skipUserPrompts Forces default selections for all user prompts during syncronisation
      * 1. Check the integrity of the given data model to ensure we can perform the synchronization
      * 2. Remove tables that are not in the data model
      * 3. Create any new tables that are in the data model but not in the database
@@ -419,7 +420,7 @@ class DivbloxDatabaseSync {
      *    foreign key constraints or drop existing ones where necessary
      * @return {Promise<boolean>} Will return false if anything fails. Reasons will be printed to the console.
      */
-    async syncDatabase() {
+    async syncDatabase(skipUserPrompts = false) {
         this.startNewCommandLineSection("Starting database sync...");
 
         dxUtils.outputFormattedLog(
@@ -428,7 +429,10 @@ class DivbloxDatabaseSync {
             dxUtils.commandLineColors.foregroundYellow
         );
 
-        const answer = await dxUtils.getCommandLineInput("Ready to proceed? (y/n)");
+        let answer = "y";
+        if (!skipUserPrompts) {
+            answer = await dxUtils.getCommandLineInput("Ready to proceed? (y/n)");
+        }
 
         if (answer.toString().toLowerCase() !== "y") {
             this.printError("Database sync cancelled.");
@@ -463,7 +467,7 @@ class DivbloxDatabaseSync {
         console.log("Based on the data model, we are expecting " + this.expectedTables.length + " table(s)");
 
         // 2. Remove tables that are not in the data model
-        if (!(await this.removeTables())) {
+        if (!(await this.removeTables(skipUserPrompts))) {
             this.printError("Error while attempting to remove tables:\n" + JSON.stringify(this.errorInfo, null, 2));
 
             if (this.foreignKeyChecksDisabled) {
@@ -673,7 +677,7 @@ class DivbloxDatabaseSync {
      * @return {Promise<boolean>} True if all good, false otherwise. If false, the errorInfo array will be populated
      * with a relevant reason
      */
-    async removeTables() {
+    async removeTables(skipUserPrompts = false) {
         this.startNewCommandLineSection("Existing table clean up");
 
         if (this.tablesToRemove.length === 0) {
@@ -681,14 +685,17 @@ class DivbloxDatabaseSync {
             return true;
         }
 
-        const answer = await dxUtils.getCommandLineInput(
-            "Removing tables that are not defined in the provided " +
+        let answer = "none";
+        if (!skipUserPrompts) {
+            answer = await dxUtils.getCommandLineInput(
+                "Removing tables that are not defined in the provided " +
                 "data model...\n" +
                 this.tablesToRemove.length +
                 " tables should be removed.\n" +
                 "How would you like to proceed?\nType 'y' to confirm & remove one-by-one;\nType 'all' to remove all;\n" +
                 "Type 'none' to skip removing any tables;\nType 'list' to show tables that will be removed (y|all|none|list)"
-        );
+            );
+        }
 
         switch (answer.toString().toLowerCase()) {
             case "list":
@@ -758,6 +765,8 @@ class DivbloxDatabaseSync {
                             this.commandLineWarningFormatting
                         );
                         dxUtils.outputFormattedLog(queryResult["error"], this.commandLineWarningFormatting);
+                    } else {
+                        dxUtils.outputFormattedLog("Removed table(s): " + tablesToDropStr, this.commandLineSubHeadingFormatting)
                     }
                 }
             }
@@ -797,6 +806,8 @@ class DivbloxDatabaseSync {
         }
 
         console.log(this.tablesToCreate.length + " new table(s) to create.");
+        const dataModelTablesToCreate = Object.fromEntries(Object.entries(this.dataModel).filter(([key]) => this.tablesToCreate.includes(key)));
+        console.log(dataModelTablesToCreate);
 
         for (const tableName of this.tablesToCreate) {
             const tableNameDataModel = this.getCaseDenormalizedString(tableName);
