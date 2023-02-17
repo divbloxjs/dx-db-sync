@@ -1,6 +1,6 @@
 {
     "name": "dx-db-sync",
-    "version": "1.0.4",
+    "version": "1.1.0",
     "description": "A tool that synchronises a given database with a provided Divblox data model. Used by divbloxjs to ensure that the underlying database corresponds to the given data model.",
     "main": "index.js",
     "scripts": {
@@ -22,7 +22,7 @@
     },
     "homepage": "https://github.com/divbloxjs/dx-db-sync#readme",
     "dependencies": {
-        "dx-db-connector": "^1.0.1",
-        "dx-utilities": "^1.0.0"
+        "dx-db-connector": "^1.1.0",
+        "dx-utilities": "^1.0.3"
     }
 }

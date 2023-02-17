@@ -14,7 +14,7 @@ class DivbloxDatabaseSync {
      * @param {*} databaseConfig The database connection configuration. An example can be found in the tests folder
      * "database-configuration". The database config can have multiple "modules", each module respresents a separate
      * database that requires its own connection information
-     * @param {*} dxDatabaseConnectorInstance Optional. If provided, we will use this connector rather than creating a
+     * @param {dxDbConnector} dxDatabaseConnectorInstance Optional. If provided, we will use this connector rather than creating a
      * new one from the provided databaseConfig. This is useful if you want to use this class inside a Divblox project
      * that already includes the dxDbConnector
      * @param {string} databaseCaseImplementation Options: lowercase|PascalCase|CamelCase
@@ -62,14 +62,6 @@ class DivbloxDatabaseSync {
         dxUtils.outputFormattedLog(lineText, dxUtils.commandLineColors.foregroundCyan);
         dxUtils.outputFormattedLog(sectionHeading, this.commandLineHeadingFormatting);
         dxUtils.outputFormattedLog(lineText, dxUtils.commandLineColors.foregroundCyan);
-    }
-
-    /**
-     * Outputs a piece of text to the command line, formatting it to appear as an error.
-     * @param message The error text to display
-     */
-    printError(message = "") {
-        dxUtils.outputFormattedLog(message, dxUtils.commandLineColors.foregroundRed);
     }
 
     /**
@@ -121,8 +113,15 @@ class DivbloxDatabaseSync {
      */
     async disableForeignKeyChecks() {
         for (const moduleName of Object.keys(this.databaseConfig)) {
-            await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 0", moduleName);
+            const queryResult = await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 0", moduleName);
+            if (queryResult === null) {
+                this.populateError(
+                    "Could not disable FK checks for '" + moduleName + "'",
+                    this.databaseConnector.getLastError()
+                );
+            }
         }
+
         this.foreignKeyChecksDisabled = true;
     }
 
@@ -132,7 +131,13 @@ class DivbloxDatabaseSync {
      */
     async restoreForeignKeyChecks() {
         for (const moduleName of Object.keys(this.databaseConfig)) {
-            await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 1", moduleName);
+            const queryResult = await this.databaseConnector.queryDB("SET FOREIGN_KEY_CHECKS = 1", moduleName);
+            if (queryResult === null) {
+                this.populateError(
+                    "Could not restore FK checks for '" + moduleName + "'",
+                    this.databaseConnector.getLastError()
+                );
+            }
         }
         this.foreignKeyChecksDisabled = false;
     }
@@ -145,6 +150,13 @@ class DivbloxDatabaseSync {
         let tables = {};
         for (const moduleName of Object.keys(this.databaseConfig)) {
             const moduleTables = await this.databaseConnector.queryDB("show full tables", moduleName);
+            if (moduleTables === null) {
+                this.populateError(
+                    "Could not show full tables for '" + moduleName + "'",
+                    this.databaseConnector.getLastError()
+                );
+            }
+
             const databaseName = this.databaseConfig[moduleName]["database"];
 
             for (let i = 0; i < moduleTables.length; i++) {
@@ -435,20 +447,22 @@ class DivbloxDatabaseSync {
         }
 
         if (answer.toString().toLowerCase() !== "y") {
-            this.printError("Database sync cancelled.");
+            this.printCustomErrorMessage("Database sync cancelled.");
             return false;
         }
 
-        await this.databaseConnector.init();
-        if (this.databaseConnector.getError().length > 0) {
-            this.printError("Database init failed: ");
-            this.printError(this.databaseConnector.getError());
+        const initSuccess = await this.databaseConnector.init();
+
+        if (!initSuccess) {
+            this.printCustomErrorMessage("Database init failed: ");
+            this.databaseConnector.printLastError();
             return false;
         }
 
         // 1. Check the integrity of the given data model to ensure we can perform the synchronization
         if (!(await this.checkDataModelIntegrity())) {
-            this.printError("Data model integrity check failed! Error:\n" + JSON.stringify(this.errorInfo, null, 2));
+            this.printCustomErrorMessage("Data model integrity check failed!");
+            this.printLastError();
             return false;
         } else {
             dxUtils.outputFormattedLog("Data model integrity check succeeded!", this.commandLineSubHeadingFormatting);
@@ -461,14 +475,17 @@ class DivbloxDatabaseSync {
         for (const expectedTable of Object.keys(this.dataModel)) {
             this.expectedTables.push(this.getCaseNormalizedString(expectedTable));
         }
+
         this.tablesToCreate = this.getTablesToCreate();
         this.tablesToRemove = this.getTablesToRemove();
+
         console.log("Database currently has " + Object.keys(this.existingTables).length + " table(s)");
         console.log("Based on the data model, we are expecting " + this.expectedTables.length + " table(s)");
 
         // 2. Remove tables that are not in the data model
         if (!(await this.removeTables(skipUserPrompts))) {
-            this.printError("Error while attempting to remove tables:\n" + JSON.stringify(this.errorInfo, null, 2));
+            this.printCustomErrorMessage("Error while attempting to remove tables");
+            this.printLastError();
 
             if (this.foreignKeyChecksDisabled) {
                 await this.restoreForeignKeyChecks();
@@ -481,7 +498,8 @@ class DivbloxDatabaseSync {
 
         // 3. Create any new tables that are in the data model but not in the database
         if (!(await this.createTables())) {
-            this.printError("Error while attempting to create new tables:\n" + JSON.stringify(this.errorInfo, null, 2));
+            this.printCustomErrorMessage("Error while attempting to create new tables");
+            this.printLastError();
 
             if (this.foreignKeyChecksDisabled) {
                 await this.restoreForeignKeyChecks();
@@ -495,9 +513,8 @@ class DivbloxDatabaseSync {
         // 4a. We call updateRelationships here to ensure any redundant foreign key constraints are removed before
         //      attempting to update the tables. This sidesteps any constraint-related errors
         if (!(await this.updateRelationships(true))) {
-            this.printError(
-                "Error while attempting to remove relationships:\n" + JSON.stringify(this.errorInfo, null, 2)
-            );
+            this.printCustomErrorMessage("Error while attempting to remove relationships");
+            this.printLastError();
 
             if (this.foreignKeyChecksDisabled) {
                 await this.restoreForeignKeyChecks();
@@ -511,7 +528,8 @@ class DivbloxDatabaseSync {
         // 4. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their columns match the data model attribute names and types
         if (!(await this.updateTables())) {
-            this.printError("Error while attempting to update tables:\n" + JSON.stringify(this.errorInfo, null, 2));
+            this.printCustomErrorMessage("Error while attempting to update tables");
+            this.printLastError();
 
             if (this.foreignKeyChecksDisabled) {
                 await this.restoreForeignKeyChecks();
@@ -525,7 +543,8 @@ class DivbloxDatabaseSync {
         // 5. Loop through all the entities in the data model and update their corresponding database tables
         //      to ensure that their indexes match the data model indexes
         if (!(await this.updateIndexes())) {
-            this.printError("Error while attempting to update indexes:\n" + JSON.stringify(this.errorInfo, null, 2));
+            this.printCustomErrorMessage("Error while attempting to update indexes");
+            this.printLastError();
 
             if (this.foreignKeyChecksDisabled) {
                 await this.restoreForeignKeyChecks();
@@ -540,9 +559,8 @@ class DivbloxDatabaseSync {
         //      to ensure that their relationships match the data model relationships. Here we either create new
         //      foreign key constraints or drop existing ones where necessary
         if (!(await this.updateRelationships())) {
-            this.printError(
-                "Error while attempting to update relationships:\n" + JSON.stringify(this.errorInfo, null, 2)
-            );
+            this.printCustomErrorMessage("Error while attempting to update relationships");
+            this.printLastError();
 
             if (this.foreignKeyChecksDisabled) {
                 await this.restoreForeignKeyChecks();
@@ -567,7 +585,7 @@ class DivbloxDatabaseSync {
 
         const entities = this.dataModel;
         if (entities.length === 0) {
-            this.errorInfo.push("Data model has no entities defined.");
+            this.populateError("Data model has no entities defined");
             return false;
         }
         const baseKeys = ["module", "attributes", "indexes", "relationships", "options"];
@@ -576,14 +594,14 @@ class DivbloxDatabaseSync {
 
             for (const baseKey of baseKeys) {
                 if (typeof entityObj[baseKey] === "undefined") {
-                    this.errorInfo.push("Entity " + entityName + " has no " + baseKey + " definition.");
+                    this.populateError("Entity " + entityName + " has no " + baseKey + " definition");
                     return false;
                 }
             }
 
             const moduleName = entityObj["module"];
             if (typeof this.databaseConfig[moduleName] === "undefined") {
-                this.errorInfo.push(
+                this.populateError(
                     "Entity " +
                         entityName +
                         " has an invalid module name provided. '" +
@@ -595,7 +613,7 @@ class DivbloxDatabaseSync {
 
             const attributes = entityObj["attributes"];
             if (attributes.length === 0) {
-                this.errorInfo.push("Entity " + entityName + " has no attributes provided.");
+                this.populateError("Entity " + entityName + " has no attributes provided");
                 return false;
             }
 
@@ -610,10 +628,14 @@ class DivbloxDatabaseSync {
                 const attributeConfigs = Object.keys(attributeObj);
 
                 if (JSON.stringify(attributeConfigs) !== JSON.stringify(Object.keys(expectedAttributeDefinition))) {
-                    this.errorInfo.push(
-                        "Invalid attribute definition for '" + entityName + "' ('" + attributeName + "'). Expected: "
+                    this.populateError(
+                        "Invalid attribute definition for '" +
+                            entityName +
+                            "' ('" +
+                            attributeName +
+                            "'). Expected: " +
+                            JSON.stringify(expectedAttributeDefinition, null, 2)
                     );
-                    this.errorInfo.push(expectedAttributeDefinition);
                     return false;
                 }
             }
@@ -626,15 +648,23 @@ class DivbloxDatabaseSync {
             };
 
             if (typeof entityObj["indexes"] !== "object") {
-                this.errorInfo.push("Invalid index definition for '" + entityName + "'. Expected: ");
-                this.errorInfo.push(expectedIndexesDefinition);
+                this.populateError(
+                    "Invalid index definition for '" +
+                        entityName +
+                        "'. Expected: " +
+                        JSON.stringify(expectedIndexesDefinition, null, 2)
+                );
                 return false;
             }
 
             for (const index of entityObj["indexes"]) {
                 if (JSON.stringify(Object.keys(index)) !== JSON.stringify(Object.keys(expectedIndexesDefinition))) {
-                    this.errorInfo.push("Invalid index definition for '" + entityName + "'. Expected: ");
-                    this.errorInfo.push(expectedIndexesDefinition);
+                    this.populateError(
+                        "Invalid index definition for '" +
+                            entityName +
+                            "'. Expected: " +
+                            JSON.stringify(expectedIndexesDefinition, null, 2)
+                    );
                     return false;
                 }
             }
@@ -645,8 +675,12 @@ class DivbloxDatabaseSync {
 
             for (const relationshipName of Object.keys(entityObj["relationships"])) {
                 if (typeof entityObj["relationships"][relationshipName] !== "object") {
-                    this.errorInfo.push("Invalid relationship definition for '" + entityName + "'. Expected: ");
-                    this.errorInfo.push(expectedRelationshipDefinition);
+                    this.populateError(
+                        "Invalid relationship definition for '" +
+                            entityName +
+                            "'. Expected: " +
+                            JSON.stringify(expectedRelationshipDefinition, null, 2)
+                    );
                     return false;
                 }
             }
@@ -654,16 +688,15 @@ class DivbloxDatabaseSync {
 
         for (const moduleName of Object.keys(this.databaseConfig)) {
             const innoDbCheckResult = await this.databaseConnector.queryDB("SHOW ENGINES", moduleName);
-            if (typeof innoDbCheckResult["error"] !== "undefined") {
-                this.errorInfo.push("Could not check database engine. Error: ");
-                this.errorInfo.push(innoDbCheckResult["error"]);
+            if (innoDbCheckResult === null) {
+                this.populateError("Could not check database engine", this.databaseConnector.getLastError());
                 return false;
             }
 
             for (const row of innoDbCheckResult) {
                 if (row["Engine"].toLowerCase() === "innodb") {
                     if (row["Support"].toLowerCase() !== "default") {
-                        this.errorInfo.push("The active database engine is NOT InnoDB. Cannot proceed.");
+                        this.populateError("The active database engine is NOT InnoDB. Cannot proceed.");
                         return false;
                     }
                 }
@@ -689,11 +722,11 @@ class DivbloxDatabaseSync {
         if (!skipUserPrompts) {
             answer = await dxUtils.getCommandLineInput(
                 "Removing tables that are not defined in the provided " +
-                "data model...\n" +
-                this.tablesToRemove.length +
-                " tables should be removed.\n" +
-                "How would you like to proceed?\nType 'y' to confirm & remove one-by-one;\nType 'all' to remove all;\n" +
-                "Type 'none' to skip removing any tables;\nType 'list' to show tables that will be removed (y|all|none|list)"
+                    "data model...\n" +
+                    this.tablesToRemove.length +
+                    " tables should be removed.\n" +
+                    "How would you like to proceed?\nType 'y' to confirm & remove one-by-one;\nType 'all' to remove all;\n" +
+                    "Type 'none' to skip removing any tables;\nType 'list' to show tables that will be removed (y|all|none|list)"
             );
         }
 
@@ -715,7 +748,7 @@ class DivbloxDatabaseSync {
                     case "none":
                         return true;
                     default:
-                        this.errorInfo.push("Invalid selection. Please try again.");
+                        this.populateError("Invalid selection. Please try again.");
                         return false;
                 }
                 break;
@@ -728,7 +761,7 @@ class DivbloxDatabaseSync {
             case "none":
                 return true;
             default:
-                this.errorInfo.push("Invalid selection. Please try again.");
+                this.populateError("Invalid selection. Please try again.");
                 return false;
         }
 
@@ -759,14 +792,20 @@ class DivbloxDatabaseSync {
                         "DROP TABLE if exists " + tablesToDropStr,
                         moduleName
                     );
-                    if (typeof queryResult["error"] !== "undefined") {
+                    if (queryResult === null) {
                         dxUtils.outputFormattedLog(
                             "Error dropping tables '" + tablesToDropStr + "':",
                             this.commandLineWarningFormatting
                         );
-                        dxUtils.outputFormattedLog(queryResult["error"], this.commandLineWarningFormatting);
+                        dxUtils.outputFormattedLog(
+                            this.databaseConnector.getLastError(),
+                            this.commandLineWarningFormatting
+                        );
                     } else {
-                        dxUtils.outputFormattedLog("Removed table(s): " + tablesToDropStr, this.commandLineSubHeadingFormatting)
+                        dxUtils.outputFormattedLog(
+                            "Removed table(s): " + tablesToDropStr,
+                            this.commandLineSubHeadingFormatting
+                        );
                     }
                 }
             }
@@ -778,7 +817,17 @@ class DivbloxDatabaseSync {
             const answer = await dxUtils.getCommandLineInput('Drop table "' + this.tablesToRemove[0] + '"? (y/n)');
             if (answer.toString().toLowerCase() === "y") {
                 for (const moduleName of Object.keys(this.databaseConfig)) {
-                    await this.databaseConnector.queryDB("DROP TABLE if exists " + this.tablesToRemove[0], moduleName);
+                    const dropResult = await this.databaseConnector.queryDB(
+                        "DROP TABLE if exists " + this.tablesToRemove[0],
+                        moduleName
+                    );
+
+                    if (dropResult === null) {
+                        this.populateError(
+                            "Could not drop table '" + this.tablesToRemove[0] + "'",
+                            this.databaseConnector.getLastError()
+                        );
+                    }
                 }
             }
 
@@ -806,7 +855,9 @@ class DivbloxDatabaseSync {
         }
 
         console.log(this.tablesToCreate.length + " new table(s) to create.");
-        const dataModelTablesToCreate = Object.fromEntries(Object.entries(this.dataModel).filter(([key]) => this.tablesToCreate.includes(key)));
+        const dataModelTablesToCreate = Object.fromEntries(
+            Object.entries(this.dataModel).filter(([key]) => this.tablesToCreate.includes(key))
+        );
         console.log(dataModelTablesToCreate);
 
         for (const tableName of this.tablesToCreate) {
@@ -823,8 +874,8 @@ class DivbloxDatabaseSync {
                 "`));";
 
             const createResult = await this.databaseConnector.queryDB(createTableSql, moduleName);
-            if (typeof createResult["error"] !== "undefined") {
-                this.errorInfo.push(createResult["error"]);
+            if (createResult === null) {
+                this.populateError("Could not create table '" + tableName + "'", this.databaseConnector.getLastError());
                 return false;
             }
         }
@@ -1021,8 +1072,8 @@ class DivbloxDatabaseSync {
 
             for (const query of sqlQuery[moduleName]) {
                 const queryResult = await this.databaseConnector.queryDB(query, moduleName);
-                if (typeof queryResult["error"] !== "undefined") {
-                    this.errorInfo.push("Could not execute query: " + queryResult["error"]);
+                if (queryResult === null) {
+                    this.populateError("Could not execute query", this.databaseConnector.getLastError());
                     return false;
                 }
             }
@@ -1086,8 +1137,13 @@ class DivbloxDatabaseSync {
                                     ";",
                                 moduleName
                             );
-                            if (typeof indexAddResult["error"] !== "undefined") {
-                                this.errorInfo.push(indexAddResult["error"]);
+
+                            if (indexAddResult === null) {
+                                this.populateError(
+                                    "Could not add INDEX '" + indexName + "' to table '" + tableName + "'",
+                                    this.databaseConnector.getLastError()
+                                );
+
                                 return false;
                             }
                             break;
@@ -1104,8 +1160,13 @@ class DivbloxDatabaseSync {
                                     ";",
                                 moduleName
                             );
-                            if (typeof uniqueAddResult["error"] !== "undefined") {
-                                this.errorInfo.push(uniqueAddResult["error"]);
+
+                            if (uniqueAddResult === null) {
+                                this.populateError(
+                                    "Could not add UNIQUE '" + indexName + "' to table '" + tableName + "'",
+                                    this.databaseConnector.getLastError()
+                                );
+
                                 return false;
                             }
                             break;
@@ -1114,8 +1175,13 @@ class DivbloxDatabaseSync {
                                 "ALTER TABLE `" + tableName + "` ADD SPATIAL `" + indexName + "` (`" + keyColumn + "`)",
                                 moduleName
                             );
-                            if (typeof spatialAddResult["error"] !== "undefined") {
-                                this.errorInfo.push(spatialAddResult["error"]);
+
+                            if (spatialAddResult === null) {
+                                this.populateError(
+                                    "Could not add SPATIAL '" + indexName + "' to table '" + tableName + "'",
+                                    this.databaseConnector.getLastError()
+                                );
+
                                 return false;
                             }
                             break;
@@ -1130,13 +1196,18 @@ class DivbloxDatabaseSync {
                                     "`)",
                                 moduleName
                             );
-                            if (typeof fulltextAddResult["error"] !== "undefined") {
-                                this.errorInfo.push(fulltextAddResult["error"]);
+
+                            if (fulltextAddResult === null) {
+                                this.populateError(
+                                    "Could not add FULLTEXT '" + indexName + "' to table '" + tableName + "'",
+                                    this.databaseConnector.getLastError()
+                                );
+
                                 return false;
                             }
                             break;
                         default:
-                            this.errorInfo.push(
+                            this.populateError(
                                 "Invalid index choice specified for " +
                                     "'" +
                                     indexObj["indexName"] +
@@ -1148,6 +1219,7 @@ class DivbloxDatabaseSync {
                                     "; " +
                                     "Valid options: index|unique|fulltext|spatial"
                             );
+
                             return false;
                     }
 
@@ -1163,8 +1235,12 @@ class DivbloxDatabaseSync {
                 if (!expectedIndexes.includes(existingIndex)) {
                     const dropQuery = "ALTER TABLE `" + tableName + "` DROP INDEX `" + existingIndex + "`";
                     const dropResult = await this.databaseConnector.queryDB(dropQuery, moduleName);
-                    if (typeof dropResult["error"] !== "undefined") {
-                        this.errorInfo.push(dropResult["error"]);
+                    if (dropResult === null) {
+                        this.populateError(
+                            "Could not drop INDEX '" + existingIndex + "' to table '" + tableName + "'",
+                            this.databaseConnector.getLastError()
+                        );
+
                         return false;
                     }
 
@@ -1227,8 +1303,12 @@ class DivbloxDatabaseSync {
                         foreignKeyResult.CONSTRAINT_NAME +
                         ";";
                     const foreignKeyDeleteResult = await this.databaseConnector.queryDB(dropQuery, moduleName);
-                    if (typeof foreignKeyDeleteResult["error"] !== "undefined") {
-                        this.errorInfo.push("Could not execute query: " + foreignKeyDeleteResult["error"]);
+                    if (foreignKeyDeleteResult === null) {
+                        this.populateError(
+                            "Could not drop FK '" + foreignKeyResult.CONSTRAINT_NAME + "'",
+                            this.databaseConnector.getLastError()
+                        );
+
                         return false;
                     }
 
@@ -1262,8 +1342,12 @@ class DivbloxDatabaseSync {
                     this.getPrimaryKeyColumn() +
                     "`) ON DELETE SET NULL ON UPDATE CASCADE;";
                 const createResult = await this.databaseConnector.queryDB(createQuery, moduleName);
-                if (typeof createResult["error"] !== "undefined") {
-                    this.errorInfo.push("Could not execute query: " + createResult["error"]);
+                if (createResult === null) {
+                    this.populateError(
+                        "Could not add FK '" + foreignKeyToCreate + "'",
+                        this.databaseConnector.getLastError()
+                    );
+
                     return false;
                 }
 
@@ -1283,6 +1367,127 @@ class DivbloxDatabaseSync {
         }
 
         return true;
+    }
+
+    //#region Error handling
+
+    /**
+     * Outputs a piece of text to the command line, formatting it to appear as an error.
+     * @param message The error text to display
+     */
+    printCustomErrorMessage(message = "") {
+        dxUtils.outputFormattedLog(message, dxUtils.commandLineColors.foregroundRed);
+    }
+
+    /**
+     * Whenever Divblox encounters an error, the errorInfo array should be populated with details about the error. This
+     * function simply returns that errorInfo array for debugging purposes
+     * @returns {[]}
+     */
+    getError() {
+        return this.errorInfo;
+    }
+
+    /**
+     * Returns the latest error that was pushed, as an error object
+     * @returns {DxBaseError|null}} The latest error
+     */
+    getLastError() {
+        let lastError = null;
+
+        if (this.errorInfo.length > 0) {
+            lastError = this.errorInfo[this.errorInfo.length - 1];
+        }
+
+        return lastError;
+    }
+
+    /**
+     * Prints to console the latest error message
+     */
+    printLastError() {
+        console.dir(this.getLastError(), { depth: null });
+    }
+
+    /**
+     * Pushes a new error object/string into the error array
+     * @param {dxErrorStack|DxBaseError|string} errorToPush An object or string containing error information
+     * @param {dxErrorStack|DxBaseError|null} errorStack An object, containing error information
+     */
+    populateError(errorToPush = "", errorStack = null) {
+        let message = "No message provided";
+        if (!errorToPush) {
+            errorToPush = message;
+        }
+
+        if (!errorStack) {
+            errorStack = errorToPush;
+        }
+
+        if (typeof errorToPush === "string") {
+            message = errorToPush;
+        } else if (
+            dxUtils.isValidObject(errorToPush) ||
+            errorToPush instanceof DxBaseError ||
+            errorToPush instanceof Error
+        ) {
+            message = errorToPush.message ? errorToPush.message : "No message provided";
+        } else {
+            this.populateError(
+                "Invalid error type provided, errors can be only of type string/Object/Error/DxBaseError"
+            );
+            return;
+        }
+
+        // Only the latest error to be of type DxBaseError
+        let newErrorStack = {
+            callerClass: errorStack.callerClass ? errorStack.callerClass : this.constructor.name,
+            message: message ? message : errorStack.message ? errorStack.message : "No message provided",
+            errorStack: errorStack.errorStack
+                ? errorStack.errorStack
+                : typeof errorStack === "string"
+                ? null
+                : errorStack,
+        };
+
+        const error = new DxBaseError(message, this.constructor.name, newErrorStack);
+
+        // Make sure to keep the deepest stackTrace
+        if (errorStack instanceof DxBaseError || errorStack instanceof Error) {
+            error.stack = errorStack.stack;
+        }
+
+        this.errorInfo.push(error);
+        return;
+    }
+
+    /**
+     * Resets the error info array
+     */
+    resetError() {
+        this.errorInfo = [];
+    }
+
+    //#endregion
+}
+
+class DxBaseError extends Error {
+    constructor(message = "", callerClass = "", errorStack = null, ...params) {
+        // Pass remaining arguments (including vendor specific ones) to parent constructor
+        super(...params);
+
+        // Maintains proper stack trace for where our error was thrown (only available on V8)
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, DxBaseError);
+        }
+
+        this.name = "DxBaseError";
+
+        // Custom debugging information
+        this.message = message;
+        this.callerClass = callerClass;
+        this.dateTimeOccurred = new Date();
+        this.errorStack = errorStack;
     }
 }
 
