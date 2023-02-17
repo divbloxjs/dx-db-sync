@@ -1390,7 +1390,7 @@ class DivbloxDatabaseSync {
 
     /**
      * Returns the latest error that was pushed, as an error object
-     * @returns {{error: {}|null}} The latest error
+     * @returns {DxBaseError|null}} The latest error
      */
     getLastError() {
         let lastError = null;
@@ -1402,13 +1402,16 @@ class DivbloxDatabaseSync {
         return lastError;
     }
 
+    /**
+     * Prints to console the latest error message
+     */
     printLastError() {
         console.dir(this.getLastError(), { depth: null });
     }
 
     /**
      * Pushes a new error object/string into the error array
-     * @param {dxErrorStack|string} errorToPush An object, array or string containing error information
+     * @param {dxErrorStack|DxBaseError|string} errorToPush An object or string containing error information
      * @param {dxErrorStack|DxBaseError|null} errorStack An object, containing error information
      */
     populateError(errorToPush = "", errorStack = null) {
