@@ -1408,26 +1408,31 @@ class DivbloxDatabaseSync {
 
     /**
      * Pushes a new error object/string into the error array
-     * @param {{}|string} errorToPush An object, array or string containing error information
-     * @param {{}|null} errorStack An object, containing error information
-     * @param {boolean} mustClean If true, the errorInfo array will first be emptied before adding the new error.
+     * @param {dxErrorStack|string} errorToPush An object, array or string containing error information
+     * @param {dxErrorStack|DxBaseError|null} errorStack An object, containing error information
      */
-    populateError(errorToPush = "", errorStack = null, mustClean = false) {
-        if (mustClean) {
-            this.resetError();
+    populateError(errorToPush = "", errorStack = null) {
+        let message = "No message provided";
+        if (!errorToPush) {
+            errorToPush = message;
         }
 
         if (!errorStack) {
             errorStack = errorToPush;
         }
 
-        let message = "No message provided";
         if (typeof errorToPush === "string") {
             message = errorToPush;
-        } else if (dxUtils.isValidObject(errorToPush)) {
+        } else if (
+            dxUtils.isValidObject(errorToPush) ||
+            errorToPush instanceof DxBaseError ||
+            errorToPush instanceof Error
+        ) {
             message = errorToPush.message ? errorToPush.message : "No message provided";
         } else {
-            this.populateError("Invalid error type provided, errors can be only of type string or Object");
+            this.populateError(
+                "Invalid error type provided, errors can be only of type string/Object/Error/DxBaseError"
+            );
             return;
         }
 
@@ -1445,7 +1450,7 @@ class DivbloxDatabaseSync {
         const error = new DxBaseError(message, this.constructor.name, newErrorStack);
 
         // Make sure to keep the deepest stackTrace
-        if (errorStack instanceof DxBaseError) {
+        if (errorStack instanceof DxBaseError || errorStack instanceof Error) {
             error.stack = errorStack.stack;
         }
 
