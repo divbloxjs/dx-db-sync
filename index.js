@@ -309,6 +309,43 @@ class DivbloxDatabaseSync {
     }
 
     /**
+     * Returns the constraint and column name that will be created in the database to represent the relationships for the given entity
+     * @param entityName The name of the entity for which to determine relationship columns
+     * @return {*[]} An array of constraint and column names in an object
+     */
+    getEntityRelationshipConstraint(entityName) {
+        let entityRelationshipConstraint = [];
+        const entityRelationships = this.dataModel[entityName]["relationships"];
+        for (const entityRelationship of Object.keys(entityRelationships)) {
+            for (const relationshipName of entityRelationships[entityRelationship]) {
+                const entityPart = this.getCaseNormalizedString(entityName);
+                const relationshipPart = this.getCaseNormalizedString(entityRelationship);
+                const relationshipNamePart = this.getCaseNormalizedString(relationshipName);
+
+                let columnName = "";
+                let constraintName = "";
+                let splitter = "_";
+                switch (this.databaseCaseImplementation.toLowerCase()) {
+                    case "lowercase":
+                        splitter = "_";
+                        break;
+                    case "pascalcase":
+                    case "camelcase":
+                        splitter = "";
+                        break;
+                    default:
+                        splitter = "_";
+                }
+                columnName = relationshipPart + splitter + relationshipNamePart;
+                constraintName = entityPart + splitter + columnName;
+
+                entityRelationshipConstraint.push({ columnName, constraintName });
+            }
+        }
+        return entityRelationshipConstraint;
+    }
+
+    /**
      * Determines the relationship, as defined in the data model from the given column name
      * @param entityName The name of the entity for which to determine the defined relationship
      * @param relationshipColumnName The column name in the database that represents the relationship
@@ -1114,7 +1151,8 @@ class DivbloxDatabaseSync {
                 existingIndexes.push(index["Key_name"]);
             }
 
-            const expectedIndexes = this.getEntityRelationshipColumns(entityName);
+            const entityRelationshipConstraints = this.getEntityRelationshipConstraint(entityName);
+            const expectedIndexes = entityRelationshipConstraints.map((obj) => obj.constraintName);
 
             for (const indexObj of this.dataModel[entityName]["indexes"]) {
                 const indexName = this.getCaseNormalizedString(indexObj["indexName"]);
@@ -1291,10 +1329,16 @@ class DivbloxDatabaseSync {
 
             const listForeignKeysResult = await this.databaseConnector.queryDB(listForeignKeysQuery, moduleName);
             let existingForeignKeys = [];
-            const entityRelationshipColumns = this.getEntityRelationshipColumns(entityName);
+            const entityRelationshipConstraints = this.getEntityRelationshipConstraint(entityName);
 
             for (const foreignKeyResult of listForeignKeysResult) {
-                if (!entityRelationshipColumns.includes(foreignKeyResult.CONSTRAINT_NAME)) {
+                let foundConstraint = null;
+                if (entityRelationshipConstraints.length) {
+                    foundConstraint = entityRelationshipConstraints.find(
+                        (obj) => obj.constraintName === foreignKeyResult.CONSTRAINT_NAME
+                    );
+                }
+                if (!foundConstraint) {
                     const dropQuery =
                         "ALTER TABLE `" +
                         schemaName +
@@ -1323,20 +1367,22 @@ class DivbloxDatabaseSync {
                 continue;
             }
 
-            const foreignKeysToCreate = entityRelationshipColumns.filter((x) => !existingForeignKeys.includes(x));
+            const foreignKeysToCreate = entityRelationshipConstraints.filter(
+                (x) => !existingForeignKeys.includes(x.constraintName)
+            );
             for (const foreignKeyToCreate of foreignKeysToCreate) {
                 const entityRelationship = this.getEntityRelationshipFromRelationshipColumn(
                     entityName,
-                    foreignKeyToCreate
+                    foreignKeyToCreate.columnName
                 );
 
                 const createQuery =
                     "ALTER TABLE `" +
                     tableName +
                     "` ADD CONSTRAINT `" +
-                    foreignKeyToCreate +
+                    foreignKeyToCreate.constraintName +
                     "` FOREIGN KEY (`" +
-                    foreignKeyToCreate +
+                    foreignKeyToCreate.columnName +
                     "`) REFERENCES `" +
                     this.getCaseNormalizedString(entityRelationship) +
                     "`(`" +
