@@ -1,28 +1,28 @@
 {
-    "name": "dx-db-sync",
-    "version": "1.1.1",
-    "description": "A tool that synchronises a given database with a provided Divblox data model. Used by divbloxjs to ensure that the underlying database corresponds to the given data model.",
-    "main": "index.js",
-    "scripts": {
-        "test": "node ./tests/test.js"
-    },
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/divbloxjs/dx-db-sync.git"
-    },
-    "keywords": [
-        "divbloxjs",
-        "nodejs",
-        "mysql"
-    ],
-    "author": "Johan Griesel, johan@divblox.com - Divblox (Pty) Ltd",
-    "license": "MIT",
-    "bugs": {
-        "url": "https://github.com/divbloxjs/dx-db-sync/issues"
-    },
-    "homepage": "https://github.com/divbloxjs/dx-db-sync#readme",
-    "dependencies": {
-        "dx-db-connector": "^1.1.0",
-        "dx-utilities": "^1.0.3"
-    }
+  "name": "dx-db-sync",
+  "version": "1.1.2",
+  "description": "A tool that synchronises a given database with a provided Divblox data model. Used by divbloxjs to ensure that the underlying database corresponds to the given data model.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node ./tests/test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/divbloxjs/dx-db-sync.git"
+  },
+  "keywords": [
+    "divbloxjs",
+    "nodejs",
+    "mysql"
+  ],
+  "author": "Johan Griesel, johan@divblox.com - Divblox (Pty) Ltd",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/divbloxjs/dx-db-sync/issues"
+  },
+  "homepage": "https://github.com/divbloxjs/dx-db-sync#readme",
+  "dependencies": {
+    "dx-db-connector": "^1.1.0",
+    "dx-utilities": "^1.0.3"
+  }
 }
