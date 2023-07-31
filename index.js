@@ -337,9 +337,10 @@ class DivbloxDatabaseSync {
                         splitter = "_";
                 }
                 columnName = relationshipPart + splitter + relationshipNamePart;
-                constraintName = entityPart + splitter + columnName;
 
-                entityRelationshipConstraint.push({ columnName, constraintName });
+                const uniqueIdentifierRaw = Date.now().toString() + Math.round(1000000 * Math.random()).toString();
+                const uniqueIdentifier = require("crypto").createHash("md5").update(uniqueIdentifierRaw).digest("hex");
+                entityRelationshipConstraint.push({ columnName, constraintName: uniqueIdentifier });
             }
         }
         return entityRelationshipConstraint;
