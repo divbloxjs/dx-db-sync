@@ -476,7 +476,7 @@ class DivbloxDatabaseSync {
 
         dxUtils.outputFormattedLog(
             "This operation will modify the existing database to align " +
-                "with the provided data model.\nEnsure that you have backed up the database if you do not want to risk any data loss.",
+            "with the provided data model.\nEnsure that you have backed up the database if you do not want to risk any data loss.",
             dxUtils.commandLineColors.foregroundYellow
         );
 
@@ -642,10 +642,10 @@ class DivbloxDatabaseSync {
             if (typeof this.databaseConfig[moduleName] === "undefined") {
                 this.populateError(
                     "Entity " +
-                        entityName +
-                        " has an invalid module name provided. '" +
-                        moduleName +
-                        "' is not defined in the database configuration"
+                    entityName +
+                    " has an invalid module name provided. '" +
+                    moduleName +
+                    "' is not defined in the database configuration"
                 );
                 return false;
             }
@@ -669,11 +669,11 @@ class DivbloxDatabaseSync {
                 if (JSON.stringify(attributeConfigs) !== JSON.stringify(Object.keys(expectedAttributeDefinition))) {
                     this.populateError(
                         "Invalid attribute definition for '" +
-                            entityName +
-                            "' ('" +
-                            attributeName +
-                            "'). Expected: " +
-                            JSON.stringify(expectedAttributeDefinition, null, 2)
+                        entityName +
+                        "' ('" +
+                        attributeName +
+                        "'). Expected: " +
+                        JSON.stringify(expectedAttributeDefinition, null, 2)
                     );
                     return false;
                 }
@@ -689,9 +689,9 @@ class DivbloxDatabaseSync {
             if (typeof entityObj["indexes"] !== "object") {
                 this.populateError(
                     "Invalid index definition for '" +
-                        entityName +
-                        "'. Expected: " +
-                        JSON.stringify(expectedIndexesDefinition, null, 2)
+                    entityName +
+                    "'. Expected: " +
+                    JSON.stringify(expectedIndexesDefinition, null, 2)
                 );
                 return false;
             }
@@ -700,9 +700,9 @@ class DivbloxDatabaseSync {
                 if (JSON.stringify(Object.keys(index)) !== JSON.stringify(Object.keys(expectedIndexesDefinition))) {
                     this.populateError(
                         "Invalid index definition for '" +
-                            entityName +
-                            "'. Expected: " +
-                            JSON.stringify(expectedIndexesDefinition, null, 2)
+                        entityName +
+                        "'. Expected: " +
+                        JSON.stringify(expectedIndexesDefinition, null, 2)
                     );
                     return false;
                 }
@@ -716,9 +716,9 @@ class DivbloxDatabaseSync {
                 if (typeof entityObj["relationships"][relationshipName] !== "object") {
                     this.populateError(
                         "Invalid relationship definition for '" +
-                            entityName +
-                            "'. Expected: " +
-                            JSON.stringify(expectedRelationshipDefinition, null, 2)
+                        entityName +
+                        "'. Expected: " +
+                        JSON.stringify(expectedRelationshipDefinition, null, 2)
                     );
                     return false;
                 }
@@ -761,11 +761,11 @@ class DivbloxDatabaseSync {
         if (!skipUserPrompts) {
             answer = await dxUtils.getCommandLineInput(
                 "Removing tables that are not defined in the provided " +
-                    "data model...\n" +
-                    this.tablesToRemove.length +
-                    " tables should be removed.\n" +
-                    "How would you like to proceed?\nType 'y' to confirm & remove one-by-one;\nType 'all' to remove all;\n" +
-                    "Type 'none' to skip removing any tables;\nType 'list' to show tables that will be removed (y|all|none|list)"
+                "data model...\n" +
+                this.tablesToRemove.length +
+                " tables should be removed.\n" +
+                "How would you like to proceed?\nType 'y' to confirm & remove one-by-one;\nType 'all' to remove all;\n" +
+                "Type 'none' to skip removing any tables;\nType 'list' to show tables that will be removed (y|all|none|list)"
             );
         }
 
@@ -774,8 +774,8 @@ class DivbloxDatabaseSync {
                 this.listTablesToRemove();
                 const answerList = await dxUtils.getCommandLineInput(
                     "How would you like to proceed?\n" +
-                        "Type 'y' to confirm & remove one-by-one;\nType 'all' to remove all;\n" +
-                        "Type 'none' to skip removing any tables; (y|all|none)"
+                    "Type 'y' to confirm & remove one-by-one;\nType 'all' to remove all;\n" +
+                    "Type 'none' to skip removing any tables; (y|all|none)"
                 );
                 switch (answerList.toString().toLowerCase()) {
                     case "all":
@@ -1012,10 +1012,10 @@ class DivbloxDatabaseSync {
                                 // This column needs to be fixed. Somehow its type got changed
                                 sqlQuery[moduleName].push(
                                     "ALTER TABLE `" +
-                                        tableName +
-                                        "` MODIFY COLUMN `" +
-                                        columnName +
-                                        "` datetime DEFAULT CURRENT_TIMESTAMP;"
+                                    tableName +
+                                    "` MODIFY COLUMN `" +
+                                    columnName +
+                                    "` datetime DEFAULT CURRENT_TIMESTAMP;"
                                 );
 
                                 if (!updatedTables.includes(entityName)) {
@@ -1036,9 +1036,9 @@ class DivbloxDatabaseSync {
                     if (dataModelOption !== tableColumnsNormalized[tableColumn["Field"]][columnOption]) {
                         sqlQuery[moduleName].push(
                             "ALTER TABLE `" +
-                                tableName +
-                                "` " +
-                                this.getAlterColumnSql(columnName, entityAttributes[columnAttributeName], "MODIFY")
+                            tableName +
+                            "` " +
+                            this.getAlterColumnSql(columnName, entityAttributes[columnAttributeName], "MODIFY")
                         );
 
                         if (!updatedTables.includes(entityName)) {
@@ -1069,18 +1069,18 @@ class DivbloxDatabaseSync {
                 const columnDataModelObject =
                     columnToCreate === this.getCaseDenormalizedString(this.getLockingConstraintColumn())
                         ? {
-                              type: "datetime",
-                              lengthOrValues: null,
-                              default: "CURRENT_TIMESTAMP",
-                              allowNull: false,
-                          }
+                            type: "datetime",
+                            lengthOrValues: null,
+                            default: "CURRENT_TIMESTAMP",
+                            allowNull: false,
+                        }
                         : entityAttributes[columnToCreate];
 
                 sqlQuery[moduleName].push(
                     "ALTER TABLE `" +
-                        tableName +
-                        "` " +
-                        this.getAlterColumnSql(columnName, columnDataModelObject, "ADD")
+                    tableName +
+                    "` " +
+                    this.getAlterColumnSql(columnName, columnDataModelObject, "ADD")
                 );
 
                 if (!updatedTables.includes(entityName)) {
@@ -1167,14 +1167,14 @@ class DivbloxDatabaseSync {
                         case "index":
                             const indexAddResult = await this.databaseConnector.queryDB(
                                 "ALTER TABLE `" +
-                                    tableName +
-                                    "` ADD INDEX `" +
-                                    indexName +
-                                    "` (`" +
-                                    keyColumn +
-                                    "`) USING " +
-                                    indexObj["type"] +
-                                    ";",
+                                tableName +
+                                "` ADD INDEX `" +
+                                indexName +
+                                "` (`" +
+                                keyColumn +
+                                "`) USING " +
+                                indexObj["type"] +
+                                ";",
                                 moduleName
                             );
 
@@ -1190,14 +1190,14 @@ class DivbloxDatabaseSync {
                         case "unique":
                             const uniqueAddResult = await this.databaseConnector.queryDB(
                                 "ALTER TABLE `" +
-                                    tableName +
-                                    "` ADD UNIQUE `" +
-                                    indexName +
-                                    "` (`" +
-                                    keyColumn +
-                                    "`) USING " +
-                                    indexObj["type"] +
-                                    ";",
+                                tableName +
+                                "` ADD UNIQUE `" +
+                                indexName +
+                                "` (`" +
+                                keyColumn +
+                                "`) USING " +
+                                indexObj["type"] +
+                                ";",
                                 moduleName
                             );
 
@@ -1228,12 +1228,12 @@ class DivbloxDatabaseSync {
                         case "fulltext":
                             const fulltextAddResult = await this.databaseConnector.queryDB(
                                 "ALTER TABLE `" +
-                                    tableName +
-                                    "` ADD FULLTEXT `" +
-                                    indexName +
-                                    "` (`" +
-                                    keyColumn +
-                                    "`)",
+                                tableName +
+                                "` ADD FULLTEXT `" +
+                                indexName +
+                                "` (`" +
+                                keyColumn +
+                                "`)",
                                 moduleName
                             );
 
@@ -1249,15 +1249,15 @@ class DivbloxDatabaseSync {
                         default:
                             this.populateError(
                                 "Invalid index choice specified for " +
-                                    "'" +
-                                    indexObj["indexName"] +
-                                    "' on '" +
-                                    entityName +
-                                    "'. " +
-                                    "Provided: " +
-                                    indexObj["indexChoice"] +
-                                    "; " +
-                                    "Valid options: index|unique|fulltext|spatial"
+                                "'" +
+                                indexObj["indexName"] +
+                                "' on '" +
+                                entityName +
+                                "'. " +
+                                "Provided: " +
+                                indexObj["indexChoice"] +
+                                "; " +
+                                "Valid options: index|unique|fulltext|spatial"
                             );
 
                             return false;
@@ -1345,9 +1345,9 @@ class DivbloxDatabaseSync {
                         schemaName +
                         "`.`" +
                         tableName +
-                        "` DROP FOREIGN KEY " +
+                        "` DROP FOREIGN KEY `" +
                         foreignKeyResult.CONSTRAINT_NAME +
-                        ";";
+                        "`;";
                     const foreignKeyDeleteResult = await this.databaseConnector.queryDB(dropQuery, moduleName);
                     if (foreignKeyDeleteResult === null) {
                         this.populateError(
@@ -1405,9 +1405,9 @@ class DivbloxDatabaseSync {
 
         console.log(
             updatedRelationships.added +
-                " Relationships added. " +
-                updatedRelationships.removed +
-                " Relationships removed."
+            " Relationships added. " +
+            updatedRelationships.removed +
+            " Relationships removed."
         );
 
         if (this.foreignKeyChecksDisabled) {
@@ -1494,8 +1494,8 @@ class DivbloxDatabaseSync {
             errorStack: errorStack.errorStack
                 ? errorStack.errorStack
                 : typeof errorStack === "string"
-                ? null
-                : errorStack,
+                    ? null
+                    : errorStack,
         };
 
         const error = new DxBaseError(message, this.constructor.name, newErrorStack);
