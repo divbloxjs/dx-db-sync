@@ -1321,12 +1321,8 @@ class DivbloxDatabaseSync {
             const tableName = this.getCaseNormalizedString(entityName);
             const schemaName = this.databaseConfig[moduleName]["database"];
 
-            const listForeignKeysQuery =
-                "SELECT * " +
-                "FROM information_schema.REFERENTIAL_CONSTRAINTS " +
-                "WHERE TABLE_NAME = '" +
-                tableName +
-                "' ";
+            const listForeignKeysQuery = `SELECT * FROM information_schema.REFERENTIAL_CONSTRAINTS 
+            WHERE TABLE_NAME = '${tableName}' AND CONSTRAINT_SCHEMA = '${schemaName}';`;
 
             const listForeignKeysResult = await this.databaseConnector.queryDB(listForeignKeysQuery, moduleName);
             let existingForeignKeys = [];
@@ -1339,6 +1335,7 @@ class DivbloxDatabaseSync {
                         (obj) => obj.constraintName === foreignKeyResult.CONSTRAINT_NAME
                     );
                 }
+
                 if (!foundConstraint) {
                     const dropQuery =
                         "ALTER TABLE `" +
