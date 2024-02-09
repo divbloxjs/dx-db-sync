@@ -1,6 +1,6 @@
 # dx-db-sync
 
-A tool that synchronises a given database with a provided Divblox data model. Used by divbloxjs to ensure that the underlying database corresponds to the given data model.
+A tool that synchronises a given database with a provided Divblox data model. Used by Divblox to ensure that the underlying database corresponds to the given data model.
 
 ## Installation
 
@@ -11,8 +11,7 @@ A tool that synchronises a given database with a provided Divblox data model. Us
 A Divblox data model describes the data structure of your project in a json file. It is important to note that
 the object is case-sensitive and that all keys and values must be provided in camelCase.
 A clean Divblox project should always contain a "data-model.json" file that contains the base entity/entities for
-your project. However, each additional Divblox package can also include its own data model which Divblox will add
-to your project on startup.
+your project.
 
 The structure of a data model object is described below.
 
@@ -41,7 +40,7 @@ Entities directly translate to database tables when the data model is synchroniz
 #### Modules
 
 Each entity must have a property called "module" that contains the name of the module in which this entity belongs.
-Modules are essentially individual databases that the Divblox Data Layer will connect to. It is important to
+Modules are essentially individual database schemas that the Divblox Data Layer will connect to. It is important to
 know in which module an entity resides, in order to connect to the correct database when executing sql queries relating
 to the specific entity.
 
@@ -153,10 +152,10 @@ to foreign key constraints and columns in the database.
 Each entity must have a property called "options". The value of this field must be an object containing additional options
 for the entity. The default options are:
 
--   "enforceLockingConstraints", which tells the Divblox database sync
-    operation to add a column "lastUpdated" to the relevant database table. This column is used to apply and manage locking
-    constraints when trying to update the relevant table.
--   "isAuditEnabled", which tells divbloxjs whether or not to audit interactions with this entity
+- "enforceLockingConstraints", which tells the Divblox database sync
+  operation to add a column "lastUpdated" to the relevant database table. This column is used to apply and manage locking
+  constraints when trying to update the relevant table.
+- "isAuditEnabled", which tells divbloxjs whether or not to audit interactions with this entity
 
 Additional options can be added here if you want to implement your own functionality on your Divblox data model.
 
