@@ -4,46 +4,53 @@ import {
     convertLowerCaseToPascalCase,
 } from "dx-utilities";
 
-/*
-/**
- * @typedef {{
- *     lowercase: "lowercase",
- *     pascalcase: "pascalcase",
- *     camelcase: "camelcase"
- * }} DB_IMPLEMENTATION_TYPES
- */
+const DB_IMPLEMENTATION_TYPES = { lowercase: "lowercase", pascalcase: "pascalcase", camelcase: "camelcase" };
 
 /**
- * @typedef {Object} DB_IMPLEMENTATION_TYPES
- * @property {string} lowercase lowercase
- * @property {string} pascalcase pascalcase
- * @property {string} camelcase camelcase
+ * @typedef {Object} DB_CONFIG_SSL_OPTIONS
+ * @property {string} ca The path to the SSL ca
+ * @property {string} key The path to the SSL key
+ * @property {string} cert The path to the SSL cert
  */
-let databaseCaseImplementation = "lowercase";
-
-/**
- * @typedef {Object} DATA_MODEL_OPTIONS
- * @property {string} a a
- * @property {string} b b
- * @property {string} c c
- */
-let dataModel;
 
 /**
  * @typedef {Object} DB_CONFIG_OPTIONS
- * @property {DB_IMPLEMENTATION_TYPES[]}
- */
-let databaseConfig;
-
-/**
- * @typedef {Object} INIT_OPTIONS
- * @property {keyof DB_IMPLEMENTATION_TYPES} databaseCaseImplementation
- * @property {keyof DATA_MODEL_OPTIONS} dataModel
- * @property {keyof DB_CONFIG_OPTIONS} databaseConfig
+ * @property {string} module The path to the SSL ca
+ * @property {string} host The path to the SSL key
+ * @property {string} user The path to the SSL cert
+ * @property {string} password The path to the SSL cert
+ * @property {string} database The path to the SSL cert
+ * @property {number} port The path to the SSL cert
+ * @property {{DB_CONFIG_SSL_OPTIONS}|false} ssl The path to the SSL cert
  */
 
+let databaseCaseImplementation = DB_IMPLEMENTATION_TYPES.lowercase;
+let dataModel;
+let databaseConfig = {
+    module: "main",
+    host: "localhost",
+    user: "user",
+    password: "123456",
+    database: "dxdevdb",
+    port: 3306,
+    ssl: false,
+};
+
 /**
- * @param {INIT_OPTIONS} options
+ * @param {Object} options Init options
+ * @param {string} options.dataModelPath The path to the file that contains the data model JSON to sync
+ * @param {keyof DB_IMPLEMENTATION_TYPES} options.databaseCaseImplementation
+ * @param {Array<DB_CONFIG_OPTIONS>} options.databaseConfig The database configuration
+ * @param {string} options.databaseConfig.module The path to the SSL ca
+ * @param {string} options.databaseConfig.host The path to the SSL key
+ * @param {string} options.databaseConfig.user The path to the SSL cert
+ * @param {string} options.databaseConfig.password The path to the SSL cert
+ * @param {string} options.databaseConfig.database The path to the SSL cert
+ * @param {number} options.databaseConfig.port The path to the SSL cert
+ * @param {Object|false} options.databaseConfig.ssl The path to the SSL cert
+ * @param {string} options.databaseConfig[].ssl.ca The path to the SSL cert
+ * @param {string} options.databaseConfig[].ssl.key The path to the SSL cert
+ * @param {string} options.databaseConfig[].ssl.cert The path to the SSL cert
  */
 export const init = (options = {}) => {
     if (options.databaseCaseImplementation) {
@@ -74,7 +81,7 @@ const getCaseNormalizedString = (inputString = "") => {
 
 /**
  *
- * @param {keyof DB_IMPLEMENTATION_TYPES} test
+ * @param {keyof DATA_MODEL_OPTIONS} test
  */
 export const test = (test) => {
     console.log(databaseCaseImplementation);
