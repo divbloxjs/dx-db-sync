@@ -24,6 +24,7 @@
     "homepage": "https://github.com/divbloxjs/dx-db-sync#readme",
     "dependencies": {
         "dx-db-connector": "^1.1.0",
-        "dx-utilities": "^2.0.0"
+        "dx-utilities": "^2.0.0",
+        "mysql2": "^3.9.1"
     }
 }
