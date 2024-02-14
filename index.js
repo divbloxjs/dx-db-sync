@@ -3,7 +3,7 @@ import {
     convertLowerCaseToCamelCase,
     convertLowerCaseToPascalCase,
 } from "dx-utilities";
-import mysql, { Connection } from "mysql2/promise";
+import mysql from "mysql2/promise";
 import {
     outputFormattedLog,
     commandLineColors,
@@ -52,7 +52,7 @@ let databaseConfig = {
 
 /**
  * @typedef moduleConnection
- * @property {Connection} connection
+ * @property {mysql.Connection} connection
  * @property {string} moduleName
  * @property {string} schemaName
  */
@@ -146,7 +146,7 @@ export const syncDatabase = async (skipUserPrompts = false) => {
     console.log(`Based on the data model, we are expecting ${expectedTableNames.length} table(s)`);
 
     console.log("tablesToCreate", tablesToCreate);
-    console.log("tablesToCreate", tablesToRemove);
+    console.log("tablesToRemove", tablesToRemove);
 
     for (const { connection } of Object.values(moduleConnections)) {
         await connection.beginTransaction();
@@ -155,7 +155,12 @@ export const syncDatabase = async (skipUserPrompts = false) => {
     startNewCommandLineSection("Existing table clean up");
     await removeTables(tablesToRemove, skipUserPrompts);
 
-    await restoreForeignKeyChecks();
+    if (foreignKeyChecksDisabled) {
+        await restoreForeignKeyChecks();
+    }
+
+    outputFormattedLog("Database clean up completed!", this.commandLineSubHeadingFormatting);
+
     for (const { connection } of Object.values(moduleConnections)) {
         await connection.commit();
     }
@@ -277,33 +282,35 @@ const disableForeignKeyChecks = async () => {
     for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
         try {
             await connection.query("SET FOREIGN_KEY_CHECKS = 0");
+            foreignKeyChecksDisabled = true;
         } catch (err) {
             await connection.rollback();
-            printErrorMessage(`Could not disable FK checks for '${moduleName}'`);
+            printErrorMessage(`Could not disable FK checks for '${moduleName}': ${err?.sqlMessage ?? ""}`);
             console.log(err);
             return false;
         }
     }
 
-    foreignKeyChecksDisabled = true;
     return true;
 };
 /**
  * A helper function that enables foreign key checks on the database
- * @return {Promise<void>}
+ * @return {Promise<boolean>}
  */
 const restoreForeignKeyChecks = async () => {
     for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
         try {
             await connection.query("SET FOREIGN_KEY_CHECKS = 1");
+            foreignKeyChecksDisabled = false;
         } catch (err) {
             await connection.rollback();
-            printErrorMessage(`Could not disable FK checks for '${moduleName}'`);
+            printErrorMessage(`Could not disable FK checks for '${moduleName}': ${err?.sqlMessage ?? ""}`);
             console.log(err);
+            return false;
         }
     }
 
-    foreignKeyChecksDisabled = false;
+    return true;
 };
 
 /**
@@ -314,7 +321,7 @@ const getDatabaseTables = async () => {
     let tables = [];
     for (const [moduleName, { connection, schemaName }] of Object.entries(moduleConnections)) {
         try {
-            const [results] = await connection.query("SHOW FULL TABLES");
+            const [results] = await connection.query("SHOW FULLa TABLES");
             if (results.length === 0) {
                 console.log(`'${moduleName} has no configured tables`);
                 continue;
@@ -325,8 +332,11 @@ const getDatabaseTables = async () => {
             });
         } catch (err) {
             await connection.rollback();
-            printErrorMessage(`Could not show full tables for '${moduleName}' in schema '${schemaName}`);
+            printErrorMessage(
+                `Could not show full tables for '${moduleName}' in schema '${schemaName}': ${err?.sqlMessage ?? ""}`,
+            );
             console.log(err);
+            process.exit(1);
         }
     }
 
@@ -392,7 +402,7 @@ const removeTablesRecursive = async (tablesToRemove = [], mustConfirm = true) =>
                 await connection.query(`DROP TABLE IF EXISTS ${tablesToRemove[0]}`);
             } catch (err) {
                 await connection.rollback();
-                printErrorMessage(`Could not drop table '${tablesToRemove[0]}'`);
+                printErrorMessage(`Could not drop table '${tablesToRemove[0]}': ${err?.sqlMessage ?? ""}`);
                 console.log(err);
                 continue;
             }
