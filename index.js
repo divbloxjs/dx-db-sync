@@ -3,10 +3,19 @@ import {
     convertLowerCaseToCamelCase,
     convertLowerCaseToPascalCase,
 } from "dx-utilities";
-import mysql from "mysql2/promise";
+import mysql, { Connection } from "mysql2/promise";
+import {
+    outputFormattedLog,
+    commandLineColors,
+    commandLineFormats,
+    getCommandLineInput,
+    printErrorMessage,
+} from "dx-cli-tools/helpers.js";
 
 const DB_IMPLEMENTATION_TYPES = { snakecase: "snakecase", pascalcase: "pascalcase", camelcase: "camelcase" };
-
+const commandLineHeadingFormatting = commandLineColors.foregroundCyan + commandLineColors.bright;
+const commandLineSubHeadingFormatting = commandLineColors.foregroundCyan + commandLineColors.dim;
+const commandLineWarningFormatting = commandLineColors.foregroundYellow;
 /**
  * @typedef {Object} DB_CONFIG_SSL_OPTIONS
  * @property {string} ca The path to the SSL ca
@@ -40,7 +49,18 @@ let databaseConfig = {
     ssl: false,
     moduleSchemaMapping: [{ moduleName: "main", schemaName: "dxdbsynctest" }],
 };
-let connections = {};
+
+/**
+ * @typedef moduleConnection
+ * @property {Connection} connection
+ * @property {string} moduleName
+ * @property {string} schemaName
+ */
+
+/**
+ * @type {Object.<string, moduleConnection>}
+ */
+let moduleConnections = {};
 
 let foreignKeyChecksDisabled = false;
 
@@ -64,24 +84,90 @@ export const init = async (options = {}) => {
         databaseCaseImplementation = options.databaseCaseImplementation;
     }
 
+    if (options.dataModel) {
+        dataModel = options.dataModel;
+    }
+
     if (options.databaseConfig) {
         databaseConfig = options.databaseConfig;
     }
 
     for (const moduleSchemaMap of databaseConfig.moduleSchemaMapping) {
-        connections[moduleSchemaMap.moduleName] = await mysql.createConnection({
+        const connection = await mysql.createConnection({
             host: databaseConfig.host,
             user: databaseConfig.user,
             password: databaseConfig.password,
             port: databaseConfig.port,
             database: moduleSchemaMap.schemaName,
         });
+        moduleConnections[moduleSchemaMap.moduleName] = {
+            connection: connection,
+            schemaName: moduleSchemaMap.schemaName,
+            moduleName: moduleSchemaMap.moduleName,
+        };
     }
 
+    // const connection = moduleConnections["main"].connection;
+    // await connection.beginTransaction();
+
+    // const sql = { sql: "select name from table_one" };
+    // const [result] = await connection.query(sql);
+
+    // const sql1 = { sql: "insert into table_one (name) VALUES ('inserted')" };
+    // const [result1] = await connection.query(sql1);
+    // const [result2] = await connection.query(sql1);
+    // const [result3] = await connection.query(sql1);
+
+    // await connection.rollback();
+    // await connection.commit();
+    // console.log("err", err);
+    // console.log("result", result);
     //TODO: Remove this. Just here for testing
+    return;
+};
+
+let existingTables = {};
+export const syncDatabase = async (skipUserPrompts = false) => {
     await disableForeignKeyChecks();
+    existingTables = await getDatabaseTables();
+    const existingTableNames = Object.keys(existingTables);
+    console.log("existingTableNames", existingTableNames);
+    const expectedTableNames = [];
+    for (const dataModelTableName of Object.keys(dataModel)) {
+        expectedTableNames.push(getCaseNormalizedString(dataModelTableName));
+    }
+
+    console.log("expectedTableNames", expectedTableNames);
+
+    const tablesToCreate = expectedTableNames.filter((name) => !existingTableNames.includes(name));
+    const tablesToRemove = existingTableNames.filter((name) => !expectedTableNames.includes(name));
+
+    console.log(`Database currently has ${existingTableNames.length} table(s)`);
+    console.log(`Based on the data model, we are expecting ${expectedTableNames.length} table(s)`);
+
+    console.log("tablesToCreate", tablesToCreate);
+    console.log("tablesToCreate", tablesToRemove);
+
+    for (const { connection } of Object.values(moduleConnections)) {
+        await connection.beginTransaction();
+    }
+
+    startNewCommandLineSection("Existing table clean up");
+    await removeTables(tablesToRemove, skipUserPrompts);
+
     await restoreForeignKeyChecks();
-    console.log(await getDatabaseTables());
+    for (const { connection } of Object.values(moduleConnections)) {
+        await connection.commit();
+    }
+    startNewCommandLineSection("Database sync completed successfully!");
+    process.exit(0);
+};
+
+const startNewCommandLineSection = (sectionHeading = "") => {
+    const lineText = "-".repeat(process.stdout.columns);
+    outputFormattedLog(lineText, commandLineColors.foregroundCyan);
+    outputFormattedLog(sectionHeading, commandLineHeadingFormatting);
+    outputFormattedLog(lineText, commandLineColors.foregroundCyan);
 };
 
 /**
@@ -126,41 +212,98 @@ const getCaseDenormalizedString = (inputString = "") => {
     }
 };
 
+const removeTables = async (tablesToRemove = [], skipUserPrompts = false) => {
+    if (tablesToRemove.length === 0) {
+        console.log("There are no tables to remove.");
+        return;
+    }
+
+    let answer = "none";
+    if (!skipUserPrompts) {
+        answer = await getCommandLineInput(
+            `Removing tables that are not defined in the provided data model...
+${tablesToRemove.length} tables should be removed.
+How would you like to proceed?
+    - Type 'y' to confirm & remove one-by-one;
+    - Type 'all' to remove all;
+    - Type 'none' to skip removing any tables;
+    - Type 'list' to show tables that will be removed (y|all|none|list) `,
+        );
+    }
+
+    switch (answer.toString().toLowerCase()) {
+        case "list":
+            listTablesToRemove(tablesToRemove);
+            const answerList = await getCommandLineInput(
+                `How would you like to proceed?
+    - Type 'y' to confirm & remove one-by-one;
+    - Type 'all' to remove all;
+    - Type 'none' to skip removing any tables; (y|all|none) `,
+            );
+            switch (answerList.toString().toLowerCase()) {
+                case "y":
+                    await removeTablesRecursive(tablesToRemove, true);
+                    break;
+                case "all":
+                    await removeTablesRecursive(tablesToRemove, false);
+                    break;
+                case "none":
+                    return;
+                default:
+                    printErrorMessage("Invalid selection. Please try again.");
+                    await removeTables(tablesToRemove, skipUserPrompts);
+                    return;
+            }
+            break;
+        case "all":
+            await removeTablesRecursive(tablesToRemove, false);
+            break;
+        case "y":
+            await removeTablesRecursive(tablesToRemove, true);
+            break;
+        case "none":
+            return;
+        default:
+            printErrorMessage("Invalid selection. Please try again.");
+            await removeTables(tablesToRemove, skipUserPrompts);
+    }
+};
+
 /**
  * A helper function that disables foreign key checks on the database
- * @return {Promise<void>}
+ * @return {Promise<boolean>}
  */
 const disableForeignKeyChecks = async () => {
-    for (const moduleSchemaMap of databaseConfig.moduleSchemaMapping) {
+    for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
         try {
-            const [results, fields] = await connections[moduleSchemaMap.moduleName].query("SET FOREIGN_KEY_CHECKS = 0");
-
-            console.log(results); // results contains rows returned by server
-            console.log(fields); // fields contains extra meta data about results, if available
+            await connection.query("SET FOREIGN_KEY_CHECKS = 0");
         } catch (err) {
-            console.log("Could not disable FK checks for '" + moduleSchemaMap.moduleName + "'", err);
+            await connection.rollback();
+            printErrorMessage(`Could not disable FK checks for '${moduleName}'`);
+            console.log(err);
+            return false;
         }
     }
 
     foreignKeyChecksDisabled = true;
+    return true;
 };
 /**
  * A helper function that enables foreign key checks on the database
  * @return {Promise<void>}
  */
 const restoreForeignKeyChecks = async () => {
-    for (const moduleSchemaMap of databaseConfig.moduleSchemaMapping) {
+    for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
         try {
-            const [results, fields] = await connections[moduleSchemaMap.moduleName].query("SET FOREIGN_KEY_CHECKS = 1");
-
-            console.log(results); // results contains rows returned by server
-            console.log(fields); // fields contains extra meta data about results, if available
+            await connection.query("SET FOREIGN_KEY_CHECKS = 1");
         } catch (err) {
-            console.log("Could not disable FK checks for '" + moduleSchemaMap.moduleName + "'", err);
+            await connection.rollback();
+            printErrorMessage(`Could not disable FK checks for '${moduleName}'`);
+            console.log(err);
         }
     }
 
-    foreignKeyChecksDisabled = true;
+    foreignKeyChecksDisabled = false;
 };
 
 /**
@@ -168,18 +311,96 @@ const restoreForeignKeyChecks = async () => {
  * @return {Promise<{}>} Returns the name and type of each table
  */
 const getDatabaseTables = async () => {
-    let tables = {};
-    for (const moduleSchemaMap of databaseConfig.moduleSchemaMapping) {
-        const [results, fields] = await connections[moduleSchemaMap.moduleName].query("show full tables");
+    let tables = [];
+    for (const [moduleName, { connection, schemaName }] of Object.entries(moduleConnections)) {
+        try {
+            const [results] = await connection.query("SHOW FULL TABLES");
+            if (results.length === 0) {
+                console.log(`'${moduleName} has no configured tables`);
+                continue;
+            }
 
-        if (results === undefined || results.length === 0) {
-            console.log("Could not show full tables for '" + moduleSchemaMap.moduleName + "'");
-        }
-
-        for (let i = 0; i < results.length; i++) {
-            const dataPacket = results[i];
-            tables[dataPacket["Tables_in_" + moduleSchemaMap.schemaName]] = dataPacket["Table_type"];
+            results.forEach((dataPacket) => {
+                tables[dataPacket[`Tables_in_${schemaName}`]] = dataPacket["Table_type"];
+            });
+        } catch (err) {
+            await connection.rollback();
+            printErrorMessage(`Could not show full tables for '${moduleName}' in schema '${schemaName}`);
+            console.log(err);
         }
     }
+
     return tables;
+};
+
+/**
+ * Prints the tables that are to be removed to the console
+ */
+const listTablesToRemove = (tablesToRemove) => {
+    for (const tableName of tablesToRemove) {
+        outputFormattedLog(`${tableName} (${existingTables[tableName]})`, commandLineColors.foregroundGreen);
+    }
+};
+
+const getTableModuleMapping = () => {
+    let tableModuleMapping = {};
+    for (const entityName of Object.keys(dataModel)) {
+        const moduleName = dataModel[entityName].module;
+
+        if (typeof tableModuleMapping[moduleName] === "undefined") {
+            tableModuleMapping[moduleName] = [];
+        }
+
+        tableModuleMapping[moduleName].push(getCaseNormalizedString(entityName));
+    }
+
+    return tableModuleMapping;
+};
+
+const removeTablesRecursive = async (tablesToRemove = [], mustConfirm = true) => {
+    if (tablesToRemove.length === 0) return;
+    const tableModuleMapping = getTableModuleMapping();
+    if (!foreignKeyChecksDisabled) await disableForeignKeyChecks();
+
+    if (!mustConfirm) {
+        // Not going to be recursive. Just a single call to drop all relevant tables
+        for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
+            if (typeof tableModuleMapping[moduleName] !== undefined && tableModuleMapping[moduleName].length > 0) {
+                const tablesToDrop = tablesToRemove.filter((name) => !tableModuleMapping[moduleName].includes(name));
+                const tablesToDropStr = tablesToDrop.join(",");
+
+                try {
+                    await connection.query(`DROP TABLE IF EXISTS ${tablesToDropStr}`);
+                    outputFormattedLog(`Removed table(s): ${tablesToDropStr}`, commandLineSubHeadingFormatting);
+                } catch (err) {
+                    await connection.rollback();
+                    outputFormattedLog(`Error dropping tables '${tablesToDropStr}':`, commandLineWarningFormatting);
+                    console.log(err);
+                    continue;
+                }
+            }
+        }
+
+        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
+        return;
+    }
+
+    const answer = await getCommandLineInput(`Drop table '${tablesToRemove[0]}'? (y/n) `);
+    if (answer.toString().toLowerCase() === "y") {
+        for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
+            try {
+                await connection.query(`DROP TABLE IF EXISTS ${tablesToRemove[0]}`);
+            } catch (err) {
+                await connection.rollback();
+                printErrorMessage(`Could not drop table '${tablesToRemove[0]}'`);
+                console.log(err);
+                continue;
+            }
+        }
+    }
+
+    tablesToRemove.shift();
+
+    await removeTablesRecursive(tablesToRemove, true);
+    if (foreignKeyChecksDisabled) restoreForeignKeyChecks();
 };

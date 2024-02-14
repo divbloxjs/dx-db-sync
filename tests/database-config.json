@@ -1,10 +1,9 @@
 {
-  "main": {
+    "moduleSchemaMapping": [{ "moduleName": "main", "schemaName": "dxdatabase" }],
     "host": "localhost",
-    "user": "dbuser",
-    "password": "123",
-    "database": "local_dx_db",
-    "port": 3306,
+    "user": "dxuser",
+    "password": "secret",
+    "database": "dxdatabase",
+    "port": 3308,
     "ssl": false
-  }
 }

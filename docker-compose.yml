@@ -1,0 +1,18 @@
+version: "1"
+services:
+    sql:
+        container_name: dx-db-sync-test
+        # image: mariadb:latest
+        #    image: biarms/mysql:5.7.33-beta-circleci # mysql image that works with m1 chip
+        image: mysql:8
+        environment:
+            MYSQL_ROOT_PASSWORD: "secret"
+            MYSQL_USER: "dxuser"
+            MYSQL_PASSWORD: "secret"
+            MYSQL_DATABASE: "dxdatabase"
+        volumes:
+            - dx-db-sync-test-data:/var/lib/mysql
+        ports:
+            - 3308:3306
+volumes:
+    dx-db-sync-test-data: {}
