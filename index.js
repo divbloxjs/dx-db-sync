@@ -128,6 +128,13 @@ export const init = async (options = {}) => {
 
 let existingTables = {};
 export const syncDatabase = async (skipUserPrompts = false) => {
+    const validDataModel = await checkDataModelIntegrity();
+    if (!validDataModel) {
+        return false;
+    }
+
+    outputFormattedLog("Data model integrity check succeeded!", commandLineSubHeadingFormatting);
+
     await disableForeignKeyChecks();
     existingTables = await getDatabaseTables();
     const existingTableNames = Object.keys(existingTables);
@@ -153,19 +160,185 @@ export const syncDatabase = async (skipUserPrompts = false) => {
     }
 
     startNewCommandLineSection("Existing table clean up");
-    await removeTables(tablesToRemove, skipUserPrompts);
+    // await removeTables(tablesToRemove, skipUserPrompts);
 
     if (foreignKeyChecksDisabled) {
         await restoreForeignKeyChecks();
     }
 
-    outputFormattedLog("Database clean up completed!", this.commandLineSubHeadingFormatting);
+    outputFormattedLog("Database clean up completed!", commandLineSubHeadingFormatting);
 
-    for (const { connection } of Object.values(moduleConnections)) {
-        await connection.commit();
+    startNewCommandLineSection("Create new tables");
+    const createResult = await createTables(tablesToCreate);
+    if (foreignKeyChecksDisabled) {
+        await restoreForeignKeyChecks();
     }
+    outputFormattedLog("Table creation completed!", commandLineSubHeadingFormatting);
+
     startNewCommandLineSection("Database sync completed successfully!");
     process.exit(0);
+};
+
+const createTables = async (tablesToCreate = []) => {
+    if (tablesToCreate.length === 0) {
+        console.log("There are no tables to create.");
+        return true;
+    }
+
+    console.log(tablesToCreate.length + " new table(s) to create.");
+    const dataModelTablesToCreate = Object.fromEntries(
+        Object.entries(dataModel).filter(([key]) => tablesToCreate.includes(key)),
+    );
+
+    console.log("dataModelTablesToCreate", dataModelTablesToCreate);
+
+    for (const tableName of tablesToCreate) {
+        const tableNameDataModel = getCaseDenormalizedString(tableName);
+        const moduleName = dataModel[tableNameDataModel]["module"];
+
+        const createTableSql = `CREATE TABLE ${tableName} (
+                ${getPrimaryKeyColumn()} BIGINT NOT NULL AUTO_INCREMENT,
+                PRIMARY KEY (${getPrimaryKeyColumn()})
+                )`;
+
+        const connection = Object.values(moduleConnections).find(
+            (connection) => connection.moduleName === moduleName,
+        )?.connection;
+
+        try {
+            await connection.query(createTableSql);
+        } catch (err) {
+            printErrorMessage(`Could not create table '${tableName}': ${err?.sqlMessage}`);
+            console.log(err);
+            return false;
+        }
+    }
+
+    return true;
+};
+/**
+ * A wrapper function that returns the "id" column, formatted to the correct case, that is used as the primary key
+ * column for all tables
+ * @return {string} Either "id" or "Id"
+ */
+const getPrimaryKeyColumn = () => {
+    switch (databaseCaseImplementation.toLowerCase()) {
+        case "lowercase":
+            return "id";
+        case "pascalcase":
+            return "Id";
+        case "camelcase":
+            return "id";
+        default:
+            return "id";
+    }
+};
+
+const checkDataModelIntegrity = async () => {
+    startNewCommandLineSection("Data model integrity check");
+
+    const entities = JSON.parse(JSON.stringify(dataModel));
+    if (entities.length === 0) {
+        printErrorMessage("Data model has no entities defined");
+        return false;
+    }
+
+    const baseKeys = ["module", "attributes", "indexes", "relationships", "options"];
+    for (const entityName of Object.keys(entities)) {
+        const entityObj = entities[entityName];
+
+        for (const baseKey of baseKeys) {
+            if (typeof entityObj[baseKey] === "undefined") {
+                printErrorMessage(`Entity '${entityName}' has no ${baseKey} definition`);
+                return false;
+            }
+        }
+
+        const moduleName = entityObj["module"];
+        if (!Object.keys(moduleConnections).includes(moduleName)) {
+            printErrorMessage(`Entity '${entityName}' has an invalid module provided: ${moduleName}`);
+            return false;
+        }
+
+        const attributes = entityObj["attributes"];
+        if (attributes.length === 0) {
+            printErrorMessage(`Entity '${entityName}' has no attributes provided`);
+            return false;
+        }
+
+        const expectedAttributeDefinition = {
+            type: "[MySQL column type]",
+            lengthOrValues: "[null|int|if type is enum, then comma separated values '1','2','3',...]",
+            default: "[value|null|CURRENT_TIMESTAMP]",
+            allowNull: "[true|false]",
+        };
+
+        for (const attributeName of Object.keys(attributes)) {
+            const attributeObj = attributes[attributeName];
+            const attributeConfigs = Object.keys(attributeObj);
+
+            if (JSON.stringify(attributeConfigs) !== JSON.stringify(Object.keys(expectedAttributeDefinition))) {
+                printErrorMessage(`Invalid attribute definition for '${entityName}' (${attributeName})`);
+                console.log("Expected: ", expectedAttributeDefinition);
+                return false;
+            }
+        }
+
+        const expectedIndexesDefinition = {
+            attribute: "[The attribute on which the index should be set]",
+            indexName: "[The name of the index]",
+            indexChoice: "[index|unique|spatial|text]",
+            type: "[BTREE|HASH]",
+        };
+
+        if (typeof entityObj["indexes"] !== "object") {
+            printErrorMessage(`Invalid index definition for '${entityName}'`);
+            console.log("Expected: ", expectedIndexesDefinition);
+            return false;
+        }
+
+        for (const index of entityObj["indexes"]) {
+            if (JSON.stringify(Object.keys(index)) !== JSON.stringify(Object.keys(expectedIndexesDefinition))) {
+                printErrorMessage(`Invalid index definition for '${entityName}'`);
+                console.log("Expected: ", expectedIndexesDefinition);
+                return false;
+            }
+        }
+
+        const expectedRelationshipDefinition = {
+            relationshipEntity: ["relationshipOneName", "relationshipTwoName"],
+        };
+
+        for (const relationshipName of Object.keys(entityObj["relationships"])) {
+            if (typeof entityObj["relationships"][relationshipName] !== "object") {
+                printErrorMessage(`Invalid relationship definition for '${entityName}'`);
+                console.log("Expected: ", expectedRelationshipDefinition);
+                return false;
+            }
+        }
+    }
+
+    for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
+        try {
+            const [results] = await connection.query("SHOW ENGINES");
+            console.log("results", results);
+            for (const row of results) {
+                if (row["Engine"].toLowerCase() === "innodb") {
+                    if (row["Support"].toLowerCase() !== "default") {
+                        printErrorMessage(`The active database engine is NOT InnoDB. Cannot proceed`);
+                        return false;
+                    }
+                }
+            }
+        } catch (err) {
+            connection.rollback();
+            printErrorMessage(`Could not check database engine`);
+            console.log(err);
+            return false;
+        }
+    }
+
+    return true;
 };
 
 const startNewCommandLineSection = (sectionHeading = "") => {
@@ -205,7 +378,7 @@ const getCaseNormalizedString = (inputString = "") => {
 const getCaseDenormalizedString = (inputString = "") => {
     // Since the data model expects camelCase, this function converts back to that
     let preparedString = inputString;
-    switch (this.databaseCaseImplementation.toLowerCase()) {
+    switch (databaseCaseImplementation.toLowerCase()) {
         case "snakecase":
             return convertLowerCaseToCamelCase(inputString, "_");
         case "pascalcase":
@@ -321,7 +494,7 @@ const getDatabaseTables = async () => {
     let tables = [];
     for (const [moduleName, { connection, schemaName }] of Object.entries(moduleConnections)) {
         try {
-            const [results] = await connection.query("SHOW FULLa TABLES");
+            const [results] = await connection.query("SHOW FULL TABLES");
             if (results.length === 0) {
                 console.log(`'${moduleName} has no configured tables`);
                 continue;
