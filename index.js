@@ -194,7 +194,6 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
 
         return false;
     }
-    outputFormattedLog("No redundant relationships!", subHeadingFormat);
 
     // 4. Loop through all the entities in the data model and update their corresponding database tables
     //      to ensure that their columns match the data model attribute names and types
@@ -234,6 +233,142 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
 
     startNewCommandLineSection("Database sync completed successfully!");
     process.exit(0);
+};
+
+//#region Main Functions
+/**
+ * Returns the tables that are currently in the database
+ * @return {Promise<{}>} Returns the name and type of each table
+ */
+const getDatabaseTables = async () => {
+    let tables = [];
+    for (const [moduleName, { connection, schemaName }] of Object.entries(moduleConnections)) {
+        try {
+            const [results] = await connection.query("SHOW FULL TABLES");
+            if (results.length === 0) {
+                console.log(`'${moduleName} has no configured tables`);
+                continue;
+            }
+
+            results.forEach((dataPacket) => {
+                tables[dataPacket[`Tables_in_${schemaName}`]] = dataPacket["Table_type"];
+            });
+        } catch (err) {
+            await connection.rollback();
+            printErrorMessage(
+                `Could not show full tables for '${moduleName}' in schema '${schemaName}': ${err?.sqlMessage ?? ""}`,
+            );
+            console.log(err);
+            process.exit(1);
+        }
+    }
+
+    return tables;
+};
+
+const removeTables = async (tablesToRemove = [], skipUserPrompts = false) => {
+    if (tablesToRemove.length === 0) {
+        console.log("There are no tables to remove.");
+        return;
+    }
+
+    let answer = "none";
+    if (!skipUserPrompts) {
+        answer = await getCommandLineInput(
+            `Removing tables that are not defined in the provided data model...
+${tablesToRemove.length} tables should be removed.
+How would you like to proceed?
+    - Type 'y' to confirm & remove one-by-one;
+    - Type 'all' to remove all;
+    - Type 'none' to skip removing any tables;
+    - Type 'list' to show tables that will be removed (y|all|none|list) `,
+        );
+    }
+
+    switch (answer.toString().toLowerCase()) {
+        case "list":
+            listTablesToRemove(tablesToRemove);
+            const answerList = await getCommandLineInput(
+                `How would you like to proceed?
+    - Type 'y' to confirm & remove one-by-one;
+    - Type 'all' to remove all;
+    - Type 'none' to skip removing any tables; (y|all|none) `,
+            );
+            switch (answerList.toString().toLowerCase()) {
+                case "y":
+                    await removeTablesRecursive(tablesToRemove, true);
+                    break;
+                case "all":
+                    await removeTablesRecursive(tablesToRemove, false);
+                    break;
+                case "none":
+                    return;
+                default:
+                    printErrorMessage("Invalid selection. Please try again.");
+                    await removeTables(tablesToRemove, skipUserPrompts);
+                    return;
+            }
+            break;
+        case "all":
+            await removeTablesRecursive(tablesToRemove, false);
+            break;
+        case "y":
+            await removeTablesRecursive(tablesToRemove, true);
+            break;
+        case "none":
+            return;
+        default:
+            printErrorMessage("Invalid selection. Please try again.");
+            await removeTables(tablesToRemove, skipUserPrompts);
+    }
+};
+
+const removeTablesRecursive = async (tablesToRemove = [], mustConfirm = true) => {
+    if (tablesToRemove.length === 0) return;
+    const tableModuleMapping = getTableModuleMapping();
+    if (!foreignKeyChecksDisabled) await disableForeignKeyChecks();
+
+    if (!mustConfirm) {
+        // Not going to be recursive. Just a single call to drop all relevant tables
+        for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
+            if (typeof tableModuleMapping[moduleName] !== undefined && tableModuleMapping[moduleName].length > 0) {
+                const tablesToDrop = tablesToRemove.filter((name) => !tableModuleMapping[moduleName].includes(name));
+                const tablesToDropStr = tablesToDrop.join(",");
+
+                try {
+                    await connection.query(`DROP TABLE IF EXISTS ${tablesToDropStr}`);
+                    outputFormattedLog(`Removed table(s): ${tablesToDropStr}`, subHeadingFormat);
+                } catch (err) {
+                    await connection.rollback();
+                    outputFormattedLog(`Error dropping tables '${tablesToDropStr}':`, warningFormat);
+                    console.log(err);
+                    continue;
+                }
+            }
+        }
+
+        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
+        return;
+    }
+
+    const answer = await getCommandLineInput(`Drop table '${tablesToRemove[0]}'? (y/n) `);
+    if (answer.toString().toLowerCase() === "y") {
+        for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
+            try {
+                await connection.query(`DROP TABLE IF EXISTS ${tablesToRemove[0]}`);
+            } catch (err) {
+                await connection.rollback();
+                printErrorMessage(`Could not drop table '${tablesToRemove[0]}': ${err?.sqlMessage ?? ""}`);
+                console.log(err);
+                continue;
+            }
+        }
+    }
+
+    tablesToRemove.shift();
+
+    await removeTablesRecursive(tablesToRemove, true);
+    if (foreignKeyChecksDisabled) restoreForeignKeyChecks();
 };
 
 const createTables = async (tablesToCreate = []) => {
@@ -652,6 +787,7 @@ const updateRelationships = async (dropOnly = false) => {
 
     return true;
 };
+//#endregion
 
 /**
  * Returns the constraint and column name that will be created in the database to represent the relationships for the given entity
@@ -949,63 +1085,6 @@ const getCaseDenormalizedString = (inputString = "") => {
 };
 //#endregion
 
-const removeTables = async (tablesToRemove = [], skipUserPrompts = false) => {
-    if (tablesToRemove.length === 0) {
-        console.log("There are no tables to remove.");
-        return;
-    }
-
-    let answer = "none";
-    if (!skipUserPrompts) {
-        answer = await getCommandLineInput(
-            `Removing tables that are not defined in the provided data model...
-${tablesToRemove.length} tables should be removed.
-How would you like to proceed?
-    - Type 'y' to confirm & remove one-by-one;
-    - Type 'all' to remove all;
-    - Type 'none' to skip removing any tables;
-    - Type 'list' to show tables that will be removed (y|all|none|list) `,
-        );
-    }
-
-    switch (answer.toString().toLowerCase()) {
-        case "list":
-            listTablesToRemove(tablesToRemove);
-            const answerList = await getCommandLineInput(
-                `How would you like to proceed?
-    - Type 'y' to confirm & remove one-by-one;
-    - Type 'all' to remove all;
-    - Type 'none' to skip removing any tables; (y|all|none) `,
-            );
-            switch (answerList.toString().toLowerCase()) {
-                case "y":
-                    await removeTablesRecursive(tablesToRemove, true);
-                    break;
-                case "all":
-                    await removeTablesRecursive(tablesToRemove, false);
-                    break;
-                case "none":
-                    return;
-                default:
-                    printErrorMessage("Invalid selection. Please try again.");
-                    await removeTables(tablesToRemove, skipUserPrompts);
-                    return;
-            }
-            break;
-        case "all":
-            await removeTablesRecursive(tablesToRemove, false);
-            break;
-        case "y":
-            await removeTablesRecursive(tablesToRemove, true);
-            break;
-        case "none":
-            return;
-        default:
-            printErrorMessage("Invalid selection. Please try again.");
-            await removeTables(tablesToRemove, skipUserPrompts);
-    }
-};
-
 //#region FK Enable/Disable Helpers
 /**
  * A helper function that disables foreign key checks on the database
@@ -1048,36 +1127,6 @@ const restoreForeignKeyChecks = async () => {
 //#endregion
 
 /**
- * Returns the tables that are currently in the database
- * @return {Promise<{}>} Returns the name and type of each table
- */
-const getDatabaseTables = async () => {
-    let tables = [];
-    for (const [moduleName, { connection, schemaName }] of Object.entries(moduleConnections)) {
-        try {
-            const [results] = await connection.query("SHOW FULL TABLES");
-            if (results.length === 0) {
-                console.log(`'${moduleName} has no configured tables`);
-                continue;
-            }
-
-            results.forEach((dataPacket) => {
-                tables[dataPacket[`Tables_in_${schemaName}`]] = dataPacket["Table_type"];
-            });
-        } catch (err) {
-            await connection.rollback();
-            printErrorMessage(
-                `Could not show full tables for '${moduleName}' in schema '${schemaName}': ${err?.sqlMessage ?? ""}`,
-            );
-            console.log(err);
-            process.exit(1);
-        }
-    }
-
-    return tables;
-};
-
-/**
  * Prints the tables that are to be removed to the console
  */
 const listTablesToRemove = (tablesToRemove) => {
@@ -1099,52 +1148,4 @@ const getTableModuleMapping = () => {
     }
 
     return tableModuleMapping;
-};
-
-const removeTablesRecursive = async (tablesToRemove = [], mustConfirm = true) => {
-    if (tablesToRemove.length === 0) return;
-    const tableModuleMapping = getTableModuleMapping();
-    if (!foreignKeyChecksDisabled) await disableForeignKeyChecks();
-
-    if (!mustConfirm) {
-        // Not going to be recursive. Just a single call to drop all relevant tables
-        for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
-            if (typeof tableModuleMapping[moduleName] !== undefined && tableModuleMapping[moduleName].length > 0) {
-                const tablesToDrop = tablesToRemove.filter((name) => !tableModuleMapping[moduleName].includes(name));
-                const tablesToDropStr = tablesToDrop.join(",");
-
-                try {
-                    await connection.query(`DROP TABLE IF EXISTS ${tablesToDropStr}`);
-                    outputFormattedLog(`Removed table(s): ${tablesToDropStr}`, subHeadingFormat);
-                } catch (err) {
-                    await connection.rollback();
-                    outputFormattedLog(`Error dropping tables '${tablesToDropStr}':`, warningFormat);
-                    console.log(err);
-                    continue;
-                }
-            }
-        }
-
-        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
-        return;
-    }
-
-    const answer = await getCommandLineInput(`Drop table '${tablesToRemove[0]}'? (y/n) `);
-    if (answer.toString().toLowerCase() === "y") {
-        for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
-            try {
-                await connection.query(`DROP TABLE IF EXISTS ${tablesToRemove[0]}`);
-            } catch (err) {
-                await connection.rollback();
-                printErrorMessage(`Could not drop table '${tablesToRemove[0]}': ${err?.sqlMessage ?? ""}`);
-                console.log(err);
-                continue;
-            }
-        }
-    }
-
-    tablesToRemove.shift();
-
-    await removeTablesRecursive(tablesToRemove, true);
-    if (foreignKeyChecksDisabled) restoreForeignKeyChecks();
 };

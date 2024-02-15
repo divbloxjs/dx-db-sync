@@ -114,7 +114,7 @@ const validateIndex = (entityName, indexDefinition = {}) => {
 
     const indexProperties = Object.keys(indexDefinition);
     if (!checkArraysAreEqual(indexProperties, Object.keys(expectedIndexDefinition))) {
-        printErrorMessage(`Invalid index definition for '${entityName}' (${indexName})`);
+        printErrorMessage(`Invalid index definition for '${entityName}' (${indexDefinition.indexName})`);
         console.log("Provided: ", indexDefinition);
         console.log("Expected: ", expectedIndexDefinition);
         return false;
