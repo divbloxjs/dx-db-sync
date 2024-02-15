@@ -1,22 +1,16 @@
 const { createHash } = await import("node:crypto");
+import mysql from "mysql2/promise";
+
+import { outputFormattedLog, getCommandLineInput, printErrorMessage } from "dx-cli-tools/helpers.js";
+import { DB_IMPLEMENTATION_TYPES, headingFormat, subHeadingFormat, warningFormat, successFormat } from "./constants.js";
+import { validateDataModel, validateDataBaseConfig } from "./optionValidation.js";
+
 import {
     getCamelCaseSplittedToLowerCase,
     convertLowerCaseToCamelCase,
     convertLowerCaseToPascalCase,
 } from "dx-utilities";
-import mysql from "mysql2/promise";
-import {
-    outputFormattedLog,
-    commandLineColors,
-    commandLineFormats,
-    getCommandLineInput,
-    printErrorMessage,
-} from "dx-cli-tools/helpers.js";
 
-const DB_IMPLEMENTATION_TYPES = { snakecase: "snakecase", pascalcase: "pascalcase", camelcase: "camelcase" };
-const commandLineHeadingFormatting = commandLineColors.foregroundCyan + commandLineColors.bright;
-const commandLineSubHeadingFormatting = commandLineColors.foregroundCyan + commandLineColors.dim;
-const commandLineWarningFormatting = commandLineColors.foregroundYellow;
 /**
  * @typedef {Object} DB_CONFIG_SSL_OPTIONS
  * @property {string} ca The path to the SSL ca
@@ -62,7 +56,6 @@ let databaseConfig = {
  * @type {Object.<string, moduleConnection>}
  */
 let moduleConnections = {};
-
 let foreignKeyChecksDisabled = false;
 
 /**
@@ -80,32 +73,41 @@ let foreignKeyChecksDisabled = false;
  * @param {string} options.databaseConfig.ssl.cert The path to the SSL cert
  * @param {Array<DB_MODULE_SCHEMA_MAPPING>} options.databaseConfig.moduleSchemaMapping A map between module names and database schema names
  */
-export const init = async (options = {}) => {
-    if (options.databaseCaseImplementation) {
-        databaseCaseImplementation = options.databaseCaseImplementation;
-    }
+const init = async (options = {}) => {
+    dataModel = validateDataModel(options?.dataModel);
+    if (!dataModel) return false;
 
-    if (options.dataModel) {
-        dataModel = options.dataModel;
-    }
+    databaseConfig = validateDataBaseConfig(options?.databaseConfig);
+    if (!databaseConfig) return false;
 
-    if (options.databaseConfig) {
-        databaseConfig = options.databaseConfig;
+    if (options?.databaseCaseImplementation) {
+        if (!Object.values(DB_IMPLEMENTATION_TYPES).includes(options.databaseCaseImplementation)) {
+            printErrorMessage(`Invalid case implementation provided: ${options.databaseCaseImplementation}`);
+            console.log(`Allowed options: ${Object.values(DB_IMPLEMENTATION_TYPES).join(", ")}`);
+            return false;
+        }
     }
 
     for (const moduleSchemaMap of databaseConfig.moduleSchemaMapping) {
-        const connection = await mysql.createConnection({
-            host: databaseConfig.host,
-            user: databaseConfig.user,
-            password: databaseConfig.password,
-            port: databaseConfig.port,
-            database: moduleSchemaMap.schemaName,
-        });
-        moduleConnections[moduleSchemaMap.moduleName] = {
-            connection: connection,
-            schemaName: moduleSchemaMap.schemaName,
-            moduleName: moduleSchemaMap.moduleName,
-        };
+        try {
+            const connection = await mysql.createConnection({
+                host: databaseConfig.host,
+                user: databaseConfig.user,
+                password: databaseConfig.password,
+                port: databaseConfig.port,
+                database: moduleSchemaMap.schemaName,
+            });
+
+            moduleConnections[moduleSchemaMap.moduleName] = {
+                connection: connection,
+                schemaName: moduleSchemaMap.schemaName,
+                moduleName: moduleSchemaMap.moduleName,
+            };
+        } catch (err) {
+            printErrorMessage(`Could not establish connection: ${err?.sqlMessage ?? ""}`);
+            console.log(err);
+            return false;
+        }
     }
 
     // const connection = moduleConnections["main"].connection;
@@ -123,29 +125,34 @@ export const init = async (options = {}) => {
     // await connection.commit();
     // console.log("err", err);
     // console.log("result", result);
-    //TODO: Remove this. Just here for testing
-    return;
+
+    return true;
 };
 
 let existingTables = {};
-export const syncDatabase = async (skipUserPrompts = false) => {
-    const validDataModel = await checkDataModelIntegrity();
-    if (!validDataModel) {
-        return false;
-    }
+export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
+    const initSuccess = await init(options);
+    if (!initSuccess) process.exit(1);
 
-    outputFormattedLog("Data model integrity check succeeded!", commandLineSubHeadingFormatting);
+    outputFormattedLog("Database connection established and initial data model validation passed!", subHeadingFormat);
+
+    // 1. Checking if data model and database connections are correct
+    const passedDataModelCheck = await checkDataModelIntegrity();
+    if (!passedDataModelCheck) process.exit(1);
+
+    outputFormattedLog("Data model integrity check succeeded!", subHeadingFormat);
 
     await disableForeignKeyChecks();
+
+    // 2. Get existing tables in database
     existingTables = await getDatabaseTables();
+
     const existingTableNames = Object.keys(existingTables);
-    console.log("existingTableNames", existingTableNames);
     const expectedTableNames = [];
+
     for (const dataModelTableName of Object.keys(dataModel)) {
         expectedTableNames.push(getCaseNormalizedString(dataModelTableName));
     }
-
-    console.log("expectedTableNames", expectedTableNames);
 
     const tablesToCreate = expectedTableNames.filter((name) => !existingTableNames.includes(name));
     const tablesToRemove = existingTableNames.filter((name) => !expectedTableNames.includes(name));
@@ -161,13 +168,13 @@ export const syncDatabase = async (skipUserPrompts = false) => {
     }
 
     startNewCommandLineSection("Existing table clean up");
-    // await removeTables(tablesToRemove, skipUserPrompts);
+    await removeTables(tablesToRemove, skipUserPrompts);
 
     if (foreignKeyChecksDisabled) {
         await restoreForeignKeyChecks();
     }
 
-    outputFormattedLog("Database clean up completed!", commandLineSubHeadingFormatting);
+    outputFormattedLog("Database clean up completed!", subHeadingFormat);
 
     startNewCommandLineSection("Create new tables");
     const createResult = await createTables(tablesToCreate);
@@ -180,7 +187,7 @@ export const syncDatabase = async (skipUserPrompts = false) => {
         await restoreForeignKeyChecks();
     }
 
-    outputFormattedLog("Table creation completed!", commandLineSubHeadingFormatting);
+    outputFormattedLog("Table creation completed!", subHeadingFormat);
 
     // 4a. We call updateRelationships here to ensure any redundant foreign key constraints are removed before
     //      attempting to update the tables. This sidesteps any constraint-related errors
@@ -194,7 +201,7 @@ export const syncDatabase = async (skipUserPrompts = false) => {
 
         return false;
     }
-    outputFormattedLog("No redundant relationships!", commandLineSubHeadingFormatting);
+    outputFormattedLog("No redundant relationships!", subHeadingFormat);
 
     // 4. Loop through all the entities in the data model and update their corresponding database tables
     //      to ensure that their columns match the data model attribute names and types
@@ -209,7 +216,7 @@ export const syncDatabase = async (skipUserPrompts = false) => {
         return false;
     }
 
-    outputFormattedLog("Table modification completed!", commandLineSubHeadingFormatting);
+    outputFormattedLog("Table modification completed!", subHeadingFormat);
 
     // 5. Loop through all the entities in the data model and update their corresponding database tables
     //      to ensure that their indexes match the data model indexes
@@ -223,7 +230,7 @@ export const syncDatabase = async (skipUserPrompts = false) => {
         return false;
     }
 
-    outputFormattedLog("Indexes up to date!", commandLineSubHeadingFormatting);
+    outputFormattedLog("Indexes up to date!", subHeadingFormat);
 
     // 6. Loop through all the entities in the data model and update their corresponding database tables
     //      to ensure that their relationships match the data model relationships. Here we either create new
@@ -236,7 +243,7 @@ export const syncDatabase = async (skipUserPrompts = false) => {
 
         return false;
     }
-    outputFormattedLog("Relationships up to date!", commandLineSubHeadingFormatting);
+    outputFormattedLog("Relationships up to date!", subHeadingFormat);
 
     startNewCommandLineSection("Database sync completed successfully!");
     process.exit(0);
@@ -301,7 +308,6 @@ const updateTables = async () => {
 
         const [tableColumns] = await connection.query(`SHOW FULL COLUMNS FROM ${tableName}`);
 
-        console.log("tableColumns", tableColumns);
         let tableColumnsNormalized = {};
 
         const entityAttributes = dataModel[entityName]["attributes"];
@@ -340,8 +346,6 @@ const updateTables = async () => {
                 default: tableColumn["Default"],
                 allowNull: allowNull,
             };
-
-            console.log("tableColumnsNormalized", tableColumnsNormalized);
 
             for (const columnOption of Object.keys(tableColumnsNormalized[tableColumn["Field"]])) {
                 if (typeof entityAttributes[columnAttributeName] === "undefined") {
@@ -492,21 +496,14 @@ const updateIndexes = async () => {
         const tableName = getCaseNormalizedString(entityName);
         const { connection, schemaName } = moduleConnections[moduleName];
 
-        console.log("entityName", entityName);
-        console.log("moduleName", moduleName);
         const [indexCheckResults] = await connection.query(`SHOW INDEX FROM ${tableName}`);
         let existingIndexes = [];
-        console.log("indexCheckResults", indexCheckResults);
         for (const index of indexCheckResults) {
             existingIndexes.push(index["Key_name"]);
         }
 
-        console.log("existingIndexes", existingIndexes);
-
         const entityRelationshipConstraints = getEntityRelationshipConstraint(entityName);
-        console.log("entityRelationshipConstraints", entityRelationshipConstraints);
         const expectedIndexes = entityRelationshipConstraints.map((obj) => obj.constraintName);
-        console.log("expectedIndexes", expectedIndexes);
         for (const indexObj of dataModel[entityName]["indexes"]) {
             const indexName = getCaseNormalizedString(indexObj["indexName"]);
             expectedIndexes.push(indexName);
@@ -559,7 +556,7 @@ const updateIndexes = async () => {
 
             if (!expectedIndexes.includes(existingIndex)) {
                 try {
-                    await connection.query(`ALTER TABLE ${tableName} DROP INDEX ${existingIndex};`);
+                    await connection.query(`ALTER TABLE ${tableName} DROP INDEX \`${existingIndex}\`;`);
                 } catch (err) {
                     printErrorMessage(`Could not drop INDEX ${existingIndex} to table ${tableName}`);
                     console.log(err);
@@ -609,7 +606,6 @@ const updateRelationships = async (dropOnly = false) => {
         try {
             const [results] = await connection.query(`SELECT * FROM information_schema.REFERENTIAL_CONSTRAINTS 
                 WHERE TABLE_NAME = '${tableName}' AND CONSTRAINT_SCHEMA = '${schemaName}';`);
-            console.log(results);
 
             for (const foreignKeyResult of results) {
                 let foundConstraint = null;
@@ -622,7 +618,7 @@ const updateRelationships = async (dropOnly = false) => {
                 if (!foundConstraint) {
                     try {
                         await connection.query(`ALTER TABLE ${schemaName}.${tableName}
-                            DROP FOREIGN KEY ${foreignKeyResult.CONSTRAINT_NAME};`);
+                            DROP FOREIGN KEY \`${foreignKeyResult.CONSTRAINT_NAME}\`;`);
                     } catch (err) {
                         printErrorMessage(
                             `Could not drop FK '${foreignKeyResult.CONSTRAINT_NAME}': ${err?.sqlMessage}`,
@@ -659,13 +655,11 @@ const updateRelationships = async (dropOnly = false) => {
             );
 
             try {
-                const res = await connection.query(`ALTER TABLE ${tableName}
-                ADD CONSTRAINT ${foreignKeyToCreate.constraintName} 
+                await connection.query(`ALTER TABLE ${tableName}
+                ADD CONSTRAINT \`${foreignKeyToCreate.constraintName}\` 
                 FOREIGN KEY (${foreignKeyToCreate.columnName})
                 REFERENCES ${getCaseNormalizedString(entityRelationship)} (${getPrimaryKeyColumn()})
                 ON DELETE SET NULL ON UPDATE CASCADE;`);
-
-                console.log("res", res);
             } catch (err) {
                 printErrorMessage(`Could not add FK '${foreignKeyToCreate}': ${err?.sqlMessage}`);
                 console.log(err);
@@ -901,92 +895,17 @@ const getEntityRelationshipColumns = (entityName) => {
 
 const checkDataModelIntegrity = async () => {
     startNewCommandLineSection("Data model integrity check");
-
-    const entities = JSON.parse(JSON.stringify(dataModel));
-    if (entities.length === 0) {
-        printErrorMessage("Data model has no entities defined");
-        return false;
-    }
-
-    const baseKeys = ["module", "attributes", "indexes", "relationships", "options"];
-    for (const entityName of Object.keys(entities)) {
-        const entityObj = entities[entityName];
-
-        for (const baseKey of baseKeys) {
-            if (typeof entityObj[baseKey] === "undefined") {
-                printErrorMessage(`Entity '${entityName}' has no ${baseKey} definition`);
-                return false;
-            }
-        }
-
-        const moduleName = entityObj["module"];
-        if (!Object.keys(moduleConnections).includes(moduleName)) {
-            printErrorMessage(`Entity '${entityName}' has an invalid module provided: ${moduleName}`);
+    for (const [entityName, entityDefinition] of Object.entries(dataModel)) {
+        if (!Object.keys(moduleConnections).includes(entityDefinition.module)) {
+            printErrorMessage(`Entity '${entityName}' has an invalid module provided: ${entityDefinition.module}`);
+            console.log(`Configured modules: ${Object.keys(moduleConnections).join(", ")}`);
             return false;
-        }
-
-        const attributes = entityObj["attributes"];
-        if (attributes.length === 0) {
-            printErrorMessage(`Entity '${entityName}' has no attributes provided`);
-            return false;
-        }
-
-        const expectedAttributeDefinition = {
-            type: "[MySQL column type]",
-            lengthOrValues: "[null|int|if type is enum, then comma separated values '1','2','3',...]",
-            default: "[value|null|CURRENT_TIMESTAMP]",
-            allowNull: "[true|false]",
-        };
-
-        for (const attributeName of Object.keys(attributes)) {
-            const attributeObj = attributes[attributeName];
-            const attributeConfigs = Object.keys(attributeObj);
-
-            if (JSON.stringify(attributeConfigs) !== JSON.stringify(Object.keys(expectedAttributeDefinition))) {
-                printErrorMessage(`Invalid attribute definition for '${entityName}' (${attributeName})`);
-                console.log("Expected: ", expectedAttributeDefinition);
-                return false;
-            }
-        }
-
-        const expectedIndexesDefinition = {
-            attribute: "[The attribute on which the index should be set]",
-            indexName: "[The name of the index]",
-            indexChoice: "[index|unique|spatial|text]",
-            type: "[BTREE|HASH]",
-        };
-
-        if (typeof entityObj["indexes"] !== "object") {
-            printErrorMessage(`Invalid index definition for '${entityName}'`);
-            console.log("Expected: ", expectedIndexesDefinition);
-            return false;
-        }
-
-        for (const index of entityObj["indexes"]) {
-            if (JSON.stringify(Object.keys(index)) !== JSON.stringify(Object.keys(expectedIndexesDefinition))) {
-                printErrorMessage(`Invalid index definition for '${entityName}'`);
-                console.log("Expected: ", expectedIndexesDefinition);
-                return false;
-            }
-        }
-
-        const expectedRelationshipDefinition = {
-            relationshipEntity: ["relationshipOneName", "relationshipTwoName"],
-        };
-
-        for (const relationshipName of Object.keys(entityObj["relationships"])) {
-            if (typeof entityObj["relationships"][relationshipName] !== "object") {
-                printErrorMessage(`Invalid relationship definition for '${entityName}'`);
-                console.log("Expected: ", expectedRelationshipDefinition);
-                return false;
-            }
         }
     }
 
     for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
         try {
             const [results] = await connection.query("SHOW ENGINES");
-            console.log("results", results);
             for (const row of results) {
                 if (row["Engine"].toLowerCase() === "innodb") {
                     if (row["Support"].toLowerCase() !== "default") {
@@ -1008,11 +927,12 @@ const checkDataModelIntegrity = async () => {
 
 const startNewCommandLineSection = (sectionHeading = "") => {
     const lineText = "-".repeat(process.stdout.columns);
-    outputFormattedLog(lineText, commandLineColors.foregroundCyan);
-    outputFormattedLog(sectionHeading, commandLineHeadingFormatting);
-    outputFormattedLog(lineText, commandLineColors.foregroundCyan);
+    outputFormattedLog(lineText, headingFormat);
+    outputFormattedLog(sectionHeading, headingFormat);
+    outputFormattedLog(lineText, headingFormat);
 };
 
+//#region Case Helpers
 /**
  * Returns the given inputString, formatted to align with the case implementation specified
  * @param {string} inputString The string to normalize, expected in cascalCase
@@ -1054,6 +974,7 @@ const getCaseDenormalizedString = (inputString = "") => {
             return convertLowerCaseToCamelCase(inputString, "_");
     }
 };
+//#endregion
 
 const removeTables = async (tablesToRemove = [], skipUserPrompts = false) => {
     if (tablesToRemove.length === 0) {
@@ -1112,6 +1033,7 @@ How would you like to proceed?
     }
 };
 
+//#region FK Enable/Disable Helpers
 /**
  * A helper function that disables foreign key checks on the database
  * @return {Promise<boolean>}
@@ -1150,6 +1072,7 @@ const restoreForeignKeyChecks = async () => {
 
     return true;
 };
+//#endregion
 
 /**
  * Returns the tables that are currently in the database
@@ -1186,7 +1109,7 @@ const getDatabaseTables = async () => {
  */
 const listTablesToRemove = (tablesToRemove) => {
     for (const tableName of tablesToRemove) {
-        outputFormattedLog(`${tableName} (${existingTables[tableName]})`, commandLineColors.foregroundGreen);
+        outputFormattedLog(`${tableName} (${existingTables[tableName]})`, successFormat);
     }
 };
 
@@ -1219,10 +1142,10 @@ const removeTablesRecursive = async (tablesToRemove = [], mustConfirm = true) =>
 
                 try {
                     await connection.query(`DROP TABLE IF EXISTS ${tablesToDropStr}`);
-                    outputFormattedLog(`Removed table(s): ${tablesToDropStr}`, commandLineSubHeadingFormatting);
+                    outputFormattedLog(`Removed table(s): ${tablesToDropStr}`, subHeadingFormat);
                 } catch (err) {
                     await connection.rollback();
-                    outputFormattedLog(`Error dropping tables '${tablesToDropStr}':`, commandLineWarningFormatting);
+                    outputFormattedLog(`Error dropping tables '${tablesToDropStr}':`, warningFormat);
                     console.log(err);
                     continue;
                 }
