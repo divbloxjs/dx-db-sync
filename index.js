@@ -1,3 +1,4 @@
+const { createHash } = await import("node:crypto");
 import {
     getCamelCaseSplittedToLowerCase,
     convertLowerCaseToCamelCase,
@@ -170,10 +171,72 @@ export const syncDatabase = async (skipUserPrompts = false) => {
 
     startNewCommandLineSection("Create new tables");
     const createResult = await createTables(tablesToCreate);
+
+    if (!createResult) {
+        process.exit(0);
+    }
+
     if (foreignKeyChecksDisabled) {
         await restoreForeignKeyChecks();
     }
+
     outputFormattedLog("Table creation completed!", commandLineSubHeadingFormatting);
+
+    // 4a. We call updateRelationships here to ensure any redundant foreign key constraints are removed before
+    //      attempting to update the tables. This sidesteps any constraint-related errors
+    const updateRelationshipsResult = await updateRelationships(true);
+    if (!updateRelationshipsResult) {
+        printErrorMessage("Error while attempting to remove relationships");
+
+        if (foreignKeyChecksDisabled) {
+            await restoreForeignKeyChecks();
+        }
+
+        return false;
+    }
+    outputFormattedLog("No redundant relationships!", commandLineSubHeadingFormatting);
+
+    // 4. Loop through all the entities in the data model and update their corresponding database tables
+    //      to ensure that their columns match the data model attribute names and types
+    const updateTablesResult = await updateTables();
+    if (!updateTablesResult) {
+        printErrorMessage("Error while attempting to update tables");
+
+        if (foreignKeyChecksDisabled) {
+            await restoreForeignKeyChecks();
+        }
+
+        return false;
+    }
+
+    outputFormattedLog("Table modification completed!", commandLineSubHeadingFormatting);
+
+    // 5. Loop through all the entities in the data model and update their corresponding database tables
+    //      to ensure that their indexes match the data model indexes
+    const updateIndexResult = await updateIndexes();
+    if (!updateIndexResult) {
+        printErrorMessage("Error while attempting to update indexes");
+        if (foreignKeyChecksDisabled) {
+            await restoreForeignKeyChecks();
+        }
+
+        return false;
+    }
+
+    outputFormattedLog("Indexes up to date!", commandLineSubHeadingFormatting);
+
+    // 6. Loop through all the entities in the data model and update their corresponding database tables
+    //      to ensure that their relationships match the data model relationships. Here we either create new
+    //      foreign key constraints or drop existing ones where necessary
+    if (!(await updateRelationships())) {
+        printErrorMessage("Error while attempting to update relationships");
+        if (foreignKeyChecksDisabled) {
+            await restoreForeignKeyChecks();
+        }
+
+        return false;
+    }
+    outputFormattedLog("Relationships up to date!", commandLineSubHeadingFormatting);
 
     startNewCommandLineSection("Database sync completed successfully!");
     process.exit(0);
@@ -216,6 +279,557 @@ const createTables = async (tablesToCreate = []) => {
 
     return true;
 };
+
+const updateTables = async () => {
+    startNewCommandLineSection("Update existing tables");
+
+    if (!foreignKeyChecksDisabled) {
+        await disableForeignKeyChecks();
+    }
+
+    let updatedTables = [];
+    let sqlQuery = {};
+
+    for (const entityName of Object.keys(dataModel)) {
+        const moduleName = dataModel[entityName]["module"];
+        const { connection, schemaName } = moduleConnections[moduleName];
+        const tableName = getCaseNormalizedString(entityName);
+
+        if (typeof sqlQuery[moduleName] === "undefined") {
+            sqlQuery[moduleName] = [];
+        }
+
+        const [tableColumns] = await connection.query(`SHOW FULL COLUMNS FROM ${tableName}`);
+
+        console.log("tableColumns", tableColumns);
+        let tableColumnsNormalized = {};
+
+        const entityAttributes = dataModel[entityName]["attributes"];
+        const expectedColumns = getEntityExpectedColumns(entityName);
+
+        let attributesProcessed = [];
+        let relationshipsProcessed = [];
+
+        for (const tableColumn of tableColumns) {
+            const columnName = tableColumn["Field"];
+            const columnAttributeName = getCaseDenormalizedString(columnName);
+            attributesProcessed.push(columnAttributeName);
+
+            if (columnAttributeName === getPrimaryKeyColumn()) {
+                continue;
+            }
+
+            // Let's check for columns to drop
+            if (!expectedColumns.includes(columnName)) {
+                sqlQuery[moduleName].push(`ALTER TABLE ${tableName} DROP COLUMN ${tableColumn["Field"]};`);
+                if (!updatedTables.includes(entityName)) {
+                    updatedTables.push(entityName);
+                }
+                continue;
+            }
+
+            // Now, let's check if the existing columns' configurations align with our data model
+            const allowNull = tableColumn["Null"] !== "NO";
+            const typeParts = tableColumn["Type"].split("(");
+            const baseType = typeParts[0];
+            const typeLength = typeParts.length > 1 ? typeParts[1].replace(")", "") : null;
+
+            tableColumnsNormalized[tableColumn["Field"]] = {
+                type: baseType,
+                lengthOrValues: typeLength,
+                default: tableColumn["Default"],
+                allowNull: allowNull,
+            };
+
+            console.log("tableColumnsNormalized", tableColumnsNormalized);
+
+            for (const columnOption of Object.keys(tableColumnsNormalized[tableColumn["Field"]])) {
+                if (typeof entityAttributes[columnAttributeName] === "undefined") {
+                    if (columnName !== getLockingConstraintColumn()) {
+                        // This must mean that the column is a foreign key column
+                        if (tableColumnsNormalized[tableColumn["Field"]]["type"].toLowerCase() !== "bigint") {
+                            // This column needs to be fixed. Somehow its type got changed
+                            sqlQuery[moduleName].push(
+                                `ALTER TABLE ${tableName} MODIFY COLUMN ${columnName} BIGINT(20);`,
+                            );
+
+                            if (!updatedTables.includes(entityName)) {
+                                updatedTables.push(entityName);
+                            }
+                        }
+                        relationshipsProcessed.push(columnName);
+                    } else {
+                        // This is the locking constraint column
+                        if (tableColumnsNormalized[tableColumn["Field"]]["type"].toLowerCase() !== "datetime") {
+                            // This column needs to be fixed. Somehow its type got changed
+                            sqlQuery[moduleName].push(
+                                `ALTER TABLE ${tableName} MODIFY COLUMN ${columnName} datetime DEFAULT CURRENT_TIMESTAMP;`,
+                            );
+
+                            if (!updatedTables.includes(entityName)) {
+                                updatedTables.push(entityName);
+                            }
+                        }
+                        attributesProcessed.push(columnName);
+                    }
+                    break;
+                }
+
+                const dataModelOption =
+                    columnOption === "lengthOrValues" && entityAttributes[columnAttributeName][columnOption] !== null
+                        ? entityAttributes[columnAttributeName][columnOption].toString()
+                        : entityAttributes[columnAttributeName][columnOption];
+
+                if (dataModelOption !== tableColumnsNormalized[tableColumn["Field"]][columnOption]) {
+                    sqlQuery[moduleName].push(
+                        `ALTER TABLE ${tableName} ${getAlterColumnSql(
+                            columnName,
+                            entityAttributes[columnAttributeName],
+                            "MODIFY",
+                        )}`,
+                    );
+
+                    if (!updatedTables.includes(entityName)) {
+                        updatedTables.push(entityName);
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Now, let's create any remaining new columns
+        let entityAttributesArray = Object.keys(entityAttributes);
+        entityAttributesArray.push(getCaseDenormalizedString(getPrimaryKeyColumn()));
+
+        if (
+            typeof dataModel[entityName]["options"] !== "undefined" &&
+            typeof dataModel[entityName]["options"]["enforceLockingConstraints"] !== "undefined"
+        ) {
+            if (dataModel[entityName]["options"]["enforceLockingConstraints"] !== false) {
+                entityAttributesArray.push(getCaseDenormalizedString(getLockingConstraintColumn()));
+            }
+        }
+        const columnsToCreate = entityAttributesArray.filter((x) => !attributesProcessed.includes(x));
+
+        for (const columnToCreate of columnsToCreate) {
+            const columnName = getCaseNormalizedString(columnToCreate);
+
+            const columnDataModelObject =
+                columnToCreate === getCaseDenormalizedString(getLockingConstraintColumn())
+                    ? {
+                          type: "datetime",
+                          lengthOrValues: null,
+                          default: "CURRENT_TIMESTAMP",
+                          allowNull: false,
+                      }
+                    : entityAttributes[columnToCreate];
+
+            sqlQuery[moduleName].push(
+                `ALTER TABLE ${tableName} ${getAlterColumnSql(columnName, columnDataModelObject, "ADD")}`,
+            );
+
+            if (!updatedTables.includes(entityName)) {
+                updatedTables.push(entityName);
+            }
+        }
+
+        const entityRelationshipColumns = getEntityRelationshipColumns(entityName);
+        const relationshipColumnsToCreate = entityRelationshipColumns.filter(
+            (x) => !relationshipsProcessed.includes(x),
+        );
+
+        for (const relationshipColumnToCreate of relationshipColumnsToCreate) {
+            sqlQuery[moduleName].push(`ALTER TABLE ${tableName} ADD COLUMN ${relationshipColumnToCreate} BIGINT(20);`);
+
+            if (!updatedTables.includes(entityName)) {
+                updatedTables.push(entityName);
+            }
+        }
+    }
+
+    for (const moduleName of Object.keys(sqlQuery)) {
+        if (sqlQuery[moduleName].length === 0) {
+            continue;
+        }
+
+        const { connection } = moduleConnections[moduleName];
+        for (const query of sqlQuery[moduleName]) {
+            try {
+                await connection.query(query);
+            } catch (err) {
+                printErrorMessage(`Could not execute query: ${err?.sqlMessage}`);
+                console.log(err);
+                return false;
+            }
+        }
+    }
+
+    console.log(updatedTables.length + " tables were updated");
+
+    if (foreignKeyChecksDisabled) {
+        await restoreForeignKeyChecks();
+    }
+
+    return true;
+};
+
+/**
+ * Cycles through all the indexes for each table to ensure they align with their data model definition
+ * @return {Promise<boolean>} True if all good, false otherwise. If false, the errorInfo array will be populated
+ * with a relevant reason
+ */
+const updateIndexes = async () => {
+    startNewCommandLineSection("Update indexes");
+
+    if (!foreignKeyChecksDisabled) {
+        await disableForeignKeyChecks();
+    }
+
+    let updatedIndexes = { added: 0, removed: 0 };
+
+    for (const entityName of Object.keys(dataModel)) {
+        const moduleName = dataModel[entityName]["module"];
+        const tableName = getCaseNormalizedString(entityName);
+        const { connection, schemaName } = moduleConnections[moduleName];
+
+        console.log("entityName", entityName);
+        console.log("moduleName", moduleName);
+        const [indexCheckResults] = await connection.query(`SHOW INDEX FROM ${tableName}`);
+        let existingIndexes = [];
+        console.log("indexCheckResults", indexCheckResults);
+        for (const index of indexCheckResults) {
+            existingIndexes.push(index["Key_name"]);
+        }
+
+        console.log("existingIndexes", existingIndexes);
+
+        const entityRelationshipConstraints = getEntityRelationshipConstraint(entityName);
+        console.log("entityRelationshipConstraints", entityRelationshipConstraints);
+        const expectedIndexes = entityRelationshipConstraints.map((obj) => obj.constraintName);
+        console.log("expectedIndexes", expectedIndexes);
+        for (const indexObj of dataModel[entityName]["indexes"]) {
+            const indexName = getCaseNormalizedString(indexObj["indexName"]);
+            expectedIndexes.push(indexName);
+
+            if (!existingIndexes.includes(indexName)) {
+                // Let's add this index
+                const keyColumn = getCaseNormalizedString(indexObj["attribute"]);
+
+                let addIndexSqlString = "";
+                switch (indexObj["indexChoice"].toLowerCase()) {
+                    case "index":
+                        addIndexSqlString = `ALTER TABLE ${tableName} ADD INDEX ${indexName} (${keyColumn}) USING ${indexObj["type"]};`;
+                        break;
+                    case "unique":
+                        addIndexSqlString = `ALTER TABLE ${tableName} ADD UNIQUE ${indexName} (${keyColumn}) USING ${indexObj["type"]};`;
+                        break;
+                    case "spatial":
+                        addIndexSqlString = `ALTER TABLE ${tableName} ADD SPATIAL ${indexName} (${keyColumn})`;
+                        break;
+                    case "fulltext":
+                        addIndexSqlString = `ALTER TABLE ${tableName} ADD FULLTEXT ${indexName} (${keyColumn})`;
+                        break;
+                    default:
+                        printErrorMessage(`Invalid index choice specified for '${indexObj["indexName"]}' on '${entityName}'.
+                        Provided: '${indexObj["indexChoice"]}'.
+                        Valid options: index|unique|fulltext|spatial`);
+
+                        return false;
+                }
+
+                try {
+                    await connection.query(addIndexSqlString);
+                } catch (err) {
+                    printErrorMessage(
+                        `Could not add ${indexObj["indexChoice"].toUpperCase()} '${indexName}' to table '${tableName}': 
+                        ${err?.sqlMessage ?? ""}`,
+                    );
+                    console.log(err);
+                    return false;
+                }
+
+                updatedIndexes.added++;
+            }
+        }
+
+        for (const existingIndex of existingIndexes) {
+            if (existingIndex.toLowerCase() === "primary") {
+                continue;
+            }
+
+            if (!expectedIndexes.includes(existingIndex)) {
+                try {
+                    await connection.query(`ALTER TABLE ${tableName} DROP INDEX ${existingIndex};`);
+                } catch (err) {
+                    printErrorMessage(`Could not drop INDEX ${existingIndex} to table ${tableName}`);
+                    console.log(err);
+                    return false;
+                }
+
+                updatedIndexes.removed++;
+            }
+        }
+    }
+
+    console.log(`${updatedIndexes.added} Indexes added.`);
+    console.log(`${updatedIndexes.removed} Indexes removed.`);
+
+    if (foreignKeyChecksDisabled) {
+        await restoreForeignKeyChecks();
+    }
+
+    return true;
+};
+
+/**
+ * Cycles through all the relationships for each table to ensure they align with their data model definition
+ * @return {Promise<boolean>} True if all good, false otherwise. If false, the errorInfo array will be populated
+ * with a relevant reason
+ */
+const updateRelationships = async (dropOnly = false) => {
+    if (dropOnly) {
+        startNewCommandLineSection("Removing redundant relationships");
+    } else {
+        startNewCommandLineSection("Update relationships");
+    }
+
+    if (!foreignKeyChecksDisabled) {
+        await disableForeignKeyChecks();
+    }
+
+    let updatedRelationships = { added: 0, removed: 0 };
+
+    for (const entityName of Object.keys(dataModel)) {
+        const moduleName = dataModel[entityName]["module"];
+        const tableName = getCaseNormalizedString(entityName);
+        const { connection, schemaName } = moduleConnections[moduleName];
+
+        const entityRelationshipConstraints = getEntityRelationshipConstraint(entityName);
+
+        try {
+            const [results] = await connection.query(`SELECT * FROM information_schema.REFERENTIAL_CONSTRAINTS 
+                WHERE TABLE_NAME = '${tableName}' AND CONSTRAINT_SCHEMA = '${schemaName}';`);
+            console.log(results);
+
+            for (const foreignKeyResult of results) {
+                let foundConstraint = null;
+                if (entityRelationshipConstraints.length) {
+                    foundConstraint = entityRelationshipConstraints.find(
+                        (obj) => obj.constraintName === foreignKeyResult.CONSTRAINT_NAME,
+                    );
+                }
+
+                if (!foundConstraint) {
+                    try {
+                        await connection.query(`ALTER TABLE ${schemaName}.${tableName}
+                            DROP FOREIGN KEY ${foreignKeyResult.CONSTRAINT_NAME};`);
+                    } catch (err) {
+                        printErrorMessage(
+                            `Could not drop FK '${foreignKeyResult.CONSTRAINT_NAME}': ${err?.sqlMessage}`,
+                        );
+                        console.log(err);
+                        return false;
+                    }
+
+                    updatedRelationships.removed++;
+                } else {
+                    existingForeignKeys.push(foreignKeyResult.CONSTRAINT_NAME);
+                }
+            }
+        } catch (err) {
+            printErrorMessage(`Could not get schema information for '${moduleName}': ${err?.sqlMessage}`);
+            console.log(err);
+            return false;
+        }
+
+        let existingForeignKeys = [];
+
+        if (dropOnly) {
+            continue;
+        }
+
+        const foreignKeysToCreate = entityRelationshipConstraints.filter(
+            (x) => !existingForeignKeys.includes(x.constraintName),
+        );
+
+        for (const foreignKeyToCreate of foreignKeysToCreate) {
+            const entityRelationship = getEntityRelationshipFromRelationshipColumn(
+                entityName,
+                foreignKeyToCreate.columnName,
+            );
+
+            try {
+                const res = await connection.query(`ALTER TABLE ${tableName}
+                ADD CONSTRAINT ${foreignKeyToCreate.constraintName} 
+                FOREIGN KEY (${foreignKeyToCreate.columnName})
+                REFERENCES ${getCaseNormalizedString(entityRelationship)} (${getPrimaryKeyColumn()})
+                ON DELETE SET NULL ON UPDATE CASCADE;`);
+
+                console.log("res", res);
+            } catch (err) {
+                printErrorMessage(`Could not add FK '${foreignKeyToCreate}': ${err?.sqlMessage}`);
+                console.log(err);
+                return false;
+            }
+
+            updatedRelationships.added++;
+        }
+    }
+
+    console.log(`${updatedRelationships.added} Relationships added.`);
+    console.log(`${updatedRelationships.removed} Relationships removed.`);
+
+    if (foreignKeyChecksDisabled) {
+        await restoreForeignKeyChecks();
+    }
+
+    return true;
+};
+
+/**
+ * Returns the constraint and column name that will be created in the database to represent the relationships for the given entity
+ * @param entityName The name of the entity for which to determine relationship columns
+ * @return {*[]} An array of constraint and column names in an object
+ */
+const getEntityRelationshipConstraint = (entityName) => {
+    let entityRelationshipConstraint = [];
+    const entityRelationships = dataModel[entityName]["relationships"];
+    for (const entityRelationship of Object.keys(entityRelationships)) {
+        for (const relationshipName of entityRelationships[entityRelationship]) {
+            const entityPart = getCaseNormalizedString(entityName);
+            const relationshipPart = getCaseNormalizedString(entityRelationship);
+            const relationshipNamePart = getCaseNormalizedString(relationshipName);
+
+            let columnName = "";
+            let constraintName = "";
+            let splitter = "_";
+            switch (databaseCaseImplementation.toLowerCase()) {
+                case "lowercase":
+                    splitter = "_";
+                    break;
+                case "pascalcase":
+                case "camelcase":
+                    splitter = "";
+                    break;
+                default:
+                    splitter = "_";
+            }
+            columnName = relationshipPart + splitter + relationshipNamePart;
+
+            const uniqueIdentifierRaw = Date.now().toString() + Math.round(1000000 * Math.random()).toString();
+            const uniqueIdentifier = createHash("md5").update(uniqueIdentifierRaw).digest("hex");
+            entityRelationshipConstraint.push({ columnName, constraintName: uniqueIdentifier });
+        }
+    }
+
+    return entityRelationshipConstraint;
+};
+
+/**
+ * Determines the relationship, as defined in the data model from the given column name
+ * @param entityName The name of the entity for which to determine the defined relationship
+ * @param relationshipColumnName The column name in the database that represents the relationship
+ * @return {string|null} The name of the relationship as defined in the data model
+ */
+const getEntityRelationshipFromRelationshipColumn = (entityName, relationshipColumnName) => {
+    const entityRelationships = dataModel[entityName]["relationships"];
+    for (const entityRelationship of Object.keys(entityRelationships)) {
+        for (const relationshipName of entityRelationships[entityRelationship]) {
+            const relationshipPart = getCaseNormalizedString(entityRelationship);
+            const relationshipNamePart = getCaseNormalizedString(relationshipName);
+
+            let columnName = "";
+            switch (databaseCaseImplementation.toLowerCase()) {
+                case "lowercase":
+                    columnName = relationshipPart + "_" + relationshipNamePart;
+                    break;
+                case "pascalcase":
+                case "camelcase":
+                    columnName = relationshipPart + relationshipNamePart;
+                    break;
+                default:
+                    columnName = relationshipPart + "_" + relationshipNamePart;
+            }
+
+            if (columnName === relationshipColumnName) {
+                return entityRelationship;
+            }
+        }
+    }
+
+    return null;
+};
+
+/**
+ * Returns the names of the table columns expected for a given entity
+ * @param entityName The name of the entity
+ * @return {string[]} An array of column names
+ */
+const getEntityExpectedColumns = (entityName) => {
+    let expectedColumns = [getPrimaryKeyColumn()];
+
+    for (const attributeColumn of Object.keys(dataModel[entityName]["attributes"])) {
+        expectedColumns.push(getCaseNormalizedString(attributeColumn));
+    }
+
+    for (const relationshipColumn of getEntityRelationshipColumns(entityName)) {
+        expectedColumns.push(getCaseNormalizedString(relationshipColumn));
+    }
+
+    if (
+        typeof dataModel[entityName]["options"] !== "undefined" &&
+        typeof dataModel[entityName]["options"]["enforceLockingConstraints"] !== "undefined"
+    ) {
+        if (dataModel[entityName]["options"]["enforceLockingConstraints"] !== false) {
+            expectedColumns.push(getLockingConstraintColumn());
+        }
+    }
+
+    return expectedColumns;
+};
+
+/**
+ * A utility function that returns the sql to alter a table based on the data model structure provided
+ * @param {string} columnName The name of the column to alter
+ * @param {*} columnDataModelObject An object containing information regarding the make-up of the column
+ * @param {string} columnDataModelObject.type The type of the column
+ * @param {null|string|int} columnDataModelObject.lengthOrValues If column type is "enum" or "set", please enter the
+ * values using this format: 'a','b','c'
+ * @param {null|value|"CURRENT_TIMESTAMP"} columnDataModelObject.default The default value for the column
+ * @param {boolean} columnDataModelObject.allowNull Whether to allow null or not for the column
+ * @param {string} operation "ADD|MODIFY"
+ * @return {string} The sql alter code
+ */
+const getAlterColumnSql = (columnName = "", columnDataModelObject = {}, operation = "MODIFY") => {
+    let sql = `${operation} COLUMN ${columnName} ${columnDataModelObject["type"]}`;
+
+    if (columnName === getPrimaryKeyColumn()) {
+        sql = `${operation} COLUMN ${getPrimaryKeyColumn()} BIGINT NOT NULL AUTO_INCREMENT FIRST, 
+            ADD PRIMARY KEY (${getPrimaryKeyColumn()});`;
+        return sql;
+    }
+
+    if (columnDataModelObject["lengthOrValues"] !== null) {
+        sql += `(${columnDataModelObject["lengthOrValues"]})`;
+    }
+
+    if (columnDataModelObject["allowNull"] === false) {
+        sql += " NOT NULL";
+    }
+
+    if (columnDataModelObject["default"] !== null) {
+        if (columnDataModelObject["default"] !== "CURRENT_TIMESTAMP") {
+            sql += ` DEFAULT '${columnDataModelObject["default"]}';`;
+        } else {
+            sql += " DEFAULT CURRENT_TIMESTAMP;";
+        }
+    } else if (columnDataModelObject["allowNull"] !== false) {
+        sql += " DEFAULT NULL;";
+    }
+
+    return sql;
+};
+
 /**
  * A wrapper function that returns the "id" column, formatted to the correct case, that is used as the primary key
  * column for all tables
@@ -232,6 +846,57 @@ const getPrimaryKeyColumn = () => {
         default:
             return "id";
     }
+};
+
+/**
+ * Divblox supports logic in its built-in ORM that determines whether a locking constraint is in place when
+ * attempting to update a specific table. A column "lastUpdated|LastUpdated|last_updated" is used to log when last
+ * a given table was updated to determine whether a locking constraint should be applied.
+ * @return {string} Either "lastUpdated", "LastUpdated" or "last_updated"
+ */
+const getLockingConstraintColumn = () => {
+    switch (databaseCaseImplementation.toLowerCase()) {
+        case "lowercase":
+            return "last_updated";
+        case "pascalcase":
+            return "LastUpdated";
+        case "camelcase":
+            return "lastUpdated";
+        default:
+            return "last_updated";
+    }
+};
+
+/**
+ * Returns the columns that will be created in the database to represent the relationships for the given entity
+ * @param entityName The name of the entity for which to determine relationship columns
+ * @return {*[]} An array of column names
+ */
+const getEntityRelationshipColumns = (entityName) => {
+    let entityRelationshipColumns = [];
+    const entityRelationships = dataModel[entityName]["relationships"];
+    for (const entityRelationship of Object.keys(entityRelationships)) {
+        for (const relationshipName of entityRelationships[entityRelationship]) {
+            const relationshipPart = getCaseNormalizedString(entityRelationship);
+            const relationshipNamePart = getCaseNormalizedString(relationshipName);
+
+            let columnName = "";
+            switch (databaseCaseImplementation.toLowerCase()) {
+                case "lowercase":
+                    columnName = relationshipPart + "_" + relationshipNamePart;
+                    break;
+                case "pascalcase":
+                case "camelcase":
+                    columnName = relationshipPart + relationshipNamePart;
+                    break;
+                default:
+                    columnName = relationshipPart + "_" + relationshipNamePart;
+            }
+
+            entityRelationshipColumns.push(columnName);
+        }
+    }
+    return entityRelationshipColumns;
 };
 
 const checkDataModelIntegrity = async () => {
