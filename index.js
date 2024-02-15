@@ -170,9 +170,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     startNewCommandLineSection("Existing table clean up");
     await removeTables(tablesToRemove, skipUserPrompts);
 
-    if (foreignKeyChecksDisabled) {
-        await restoreForeignKeyChecks();
-    }
+    if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
     outputFormattedLog("Database clean up completed!", subHeadingFormat);
 
@@ -180,11 +178,8 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     const createResult = await createTables(tablesToCreate);
 
     if (!createResult) {
+        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
         process.exit(0);
-    }
-
-    if (foreignKeyChecksDisabled) {
-        await restoreForeignKeyChecks();
     }
 
     outputFormattedLog("Table creation completed!", subHeadingFormat);
@@ -195,9 +190,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     if (!updateRelationshipsResult) {
         printErrorMessage("Error while attempting to remove relationships");
 
-        if (foreignKeyChecksDisabled) {
-            await restoreForeignKeyChecks();
-        }
+        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
         return false;
     }
@@ -209,9 +202,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     if (!updateTablesResult) {
         printErrorMessage("Error while attempting to update tables");
 
-        if (foreignKeyChecksDisabled) {
-            await restoreForeignKeyChecks();
-        }
+        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
         return false;
     }
@@ -223,9 +214,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     const updateIndexResult = await updateIndexes();
     if (!updateIndexResult) {
         printErrorMessage("Error while attempting to update indexes");
-        if (foreignKeyChecksDisabled) {
-            await restoreForeignKeyChecks();
-        }
+        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
         return false;
     }
@@ -237,9 +226,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     //      foreign key constraints or drop existing ones where necessary
     if (!(await updateRelationships())) {
         printErrorMessage("Error while attempting to update relationships");
-        if (foreignKeyChecksDisabled) {
-            await restoreForeignKeyChecks();
-        }
+        if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
         return false;
     }
@@ -289,10 +276,7 @@ const createTables = async (tablesToCreate = []) => {
 
 const updateTables = async () => {
     startNewCommandLineSection("Update existing tables");
-
-    if (!foreignKeyChecksDisabled) {
-        await disableForeignKeyChecks();
-    }
+    if (!foreignKeyChecksDisabled) await disableForeignKeyChecks();
 
     let updatedTables = [];
     let sqlQuery = {};
@@ -470,9 +454,7 @@ const updateTables = async () => {
 
     console.log(updatedTables.length + " tables were updated");
 
-    if (foreignKeyChecksDisabled) {
-        await restoreForeignKeyChecks();
-    }
+    if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
     return true;
 };
@@ -484,10 +466,7 @@ const updateTables = async () => {
  */
 const updateIndexes = async () => {
     startNewCommandLineSection("Update indexes");
-
-    if (!foreignKeyChecksDisabled) {
-        await disableForeignKeyChecks();
-    }
+    if (!foreignKeyChecksDisabled) await disableForeignKeyChecks();
 
     let updatedIndexes = { added: 0, removed: 0 };
 
@@ -571,9 +550,7 @@ const updateIndexes = async () => {
     console.log(`${updatedIndexes.added} Indexes added.`);
     console.log(`${updatedIndexes.removed} Indexes removed.`);
 
-    if (foreignKeyChecksDisabled) {
-        await restoreForeignKeyChecks();
-    }
+    if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
     return true;
 };
@@ -590,9 +567,7 @@ const updateRelationships = async (dropOnly = false) => {
         startNewCommandLineSection("Update relationships");
     }
 
-    if (!foreignKeyChecksDisabled) {
-        await disableForeignKeyChecks();
-    }
+    if (!foreignKeyChecksDisabled) await disableForeignKeyChecks();
 
     let updatedRelationships = { added: 0, removed: 0 };
 
@@ -673,9 +648,7 @@ const updateRelationships = async (dropOnly = false) => {
     console.log(`${updatedRelationships.added} Relationships added.`);
     console.log(`${updatedRelationships.removed} Relationships removed.`);
 
-    if (foreignKeyChecksDisabled) {
-        await restoreForeignKeyChecks();
-    }
+    if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
     return true;
 };
