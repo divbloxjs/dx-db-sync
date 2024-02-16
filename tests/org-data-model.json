@@ -1,0 +1,163 @@
+{
+    "organisation": {
+        "module": "main",
+        "attributes": {
+            "organisationName": {
+                "name": "organisationName",
+                "type": "varchar",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": 150
+            },
+            "isDefault": {
+                "name": "isDefault",
+                "type": "boolean",
+                "default": 0,
+                "allowNull": true,
+                "lengthOrValues": null
+            },
+            "description": {
+                "name": "description",
+                "type": "text",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": null
+            },
+            "effort": {
+                "name": "effort",
+                "type": "double",
+                "default": null,
+                "allowNull": false,
+                "lengthOrValues": null
+            }
+        },
+        "relationships": {},
+        "indexes": [],
+        "options": {
+            "isAuditEnabled": true,
+            "enforceLockingConstraints": true
+        }
+    },
+    "parentOrganisation": {
+        "module": "main",
+        "attributes": {
+            "organisationName": {
+                "name": "organisationName",
+                "type": "varchar",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": 150
+            },
+            "isDefault": {
+                "name": "isDefault",
+                "type": "boolean",
+                "default": 0,
+                "allowNull": true,
+                "lengthOrValues": null
+            },
+            "description": {
+                "name": "description",
+                "type": "text",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": null
+            },
+            "effort": {
+                "name": "effort",
+                "type": "double",
+                "default": null,
+                "allowNull": false,
+                "lengthOrValues": null
+            }
+        },
+        "relationships": {
+            "organisation": ["parentOrganisation"]
+        },
+        "indexes": [],
+        "options": {
+            "isAuditEnabled": true,
+            "enforceLockingConstraints": true
+        }
+    },
+    "grandParentOrganisation": {
+        "module": "main",
+        "attributes": {
+            "organisationName": {
+                "name": "organisationName",
+                "type": "varchar",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": 150
+            },
+            "isDefault": {
+                "name": "isDefault",
+                "type": "boolean",
+                "default": 0,
+                "allowNull": true,
+                "lengthOrValues": null
+            },
+            "description": {
+                "name": "description",
+                "type": "text",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": null
+            },
+            "effort": {
+                "name": "effort",
+                "type": "double",
+                "default": null,
+                "allowNull": false,
+                "lengthOrValues": null
+            }
+        },
+        "relationships": {
+            "parentOrganisation": ["grandParentOrganisation"]
+        },
+        "indexes": [],
+        "options": {
+            "isAuditEnabled": true,
+            "enforceLockingConstraints": true
+        }
+    },
+    "place": {
+        "module": "other",
+        "attributes": {
+            "placeName": {
+                "name": "placeName",
+                "type": "varchar",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": 150
+            }
+        },
+        "relationships": {
+            "organisation": ["place"]
+        },
+        "indexes": [],
+        "options": {
+            "isAuditEnabled": true,
+            "enforceLockingConstraints": true
+        }
+    },
+    "parentPlace": {
+        "module": "other",
+        "attributes": {
+            "placeName": {
+                "name": "placeName",
+                "type": "varchar",
+                "default": null,
+                "allowNull": true,
+                "lengthOrValues": 150
+            }
+        },
+        "relationships": {
+            "place": ["parentPlace"]
+        },
+        "indexes": [],
+        "options": {
+            "isAuditEnabled": true,
+            "enforceLockingConstraints": true
+        }
+    }
+}

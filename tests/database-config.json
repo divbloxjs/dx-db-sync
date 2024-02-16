@@ -1,8 +1,7 @@
 {
     "moduleSchemaMapping": [
         { "moduleName": "main", "schemaName": "dxdatabase" },
-        { "moduleName": "organisations", "schemaName": "dxdatabase" },
-        { "moduleName": "delivery", "schemaName": "dxdatabase_2" }
+        { "moduleName": "other", "schemaName": "dxdatabase_2" }
     ],
     "host": "localhost",
     "user": "root",

@@ -170,8 +170,8 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
 
     // await commitForAllModuleConnections();
     await rollbackForAllModuleConnections();
-    process.exit(0);
-    return;
+    // process.exit(0);
+    // return;
 
     if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
