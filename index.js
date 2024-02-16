@@ -163,12 +163,15 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     console.log("tablesToCreate", tablesToCreate);
     console.log("tablesToRemove", tablesToRemove);
 
-    for (const { connection } of Object.values(moduleConnections)) {
-        await connection.beginTransaction();
-    }
+    await beginTransactionForAllModuleConnections();
 
     startNewCommandLineSection("Existing table clean up");
     await removeTables(tablesToRemove, skipUserPrompts);
+
+    // await commitForAllModuleConnections();
+    await rollbackForAllModuleConnections();
+    process.exit(0);
+    return;
 
     if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
@@ -233,6 +236,24 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
 
     startNewCommandLineSection("Database sync completed successfully!");
     process.exit(0);
+};
+
+const beginTransactionForAllModuleConnections = async () => {
+    for (const { connection } of Object.values(moduleConnections)) {
+        await connection.beginTransaction();
+    }
+};
+
+const rollbackForAllModuleConnections = async () => {
+    for (const { connection } of Object.values(moduleConnections)) {
+        await connection.rollback();
+    }
+};
+
+const commitForAllModuleConnections = async () => {
+    for (const { connection } of Object.values(moduleConnections)) {
+        await connection.commit();
+    }
 };
 
 //#region Main Functions

@@ -1,9 +1,12 @@
 {
-    "moduleSchemaMapping": [{ "moduleName": "main", "schemaName": "dxdatabase" }],
+    "moduleSchemaMapping": [
+        { "moduleName": "main", "schemaName": "dxdatabase" },
+        { "moduleName": "organisations", "schemaName": "dxdatabase" },
+        { "moduleName": "delivery", "schemaName": "dxdatabase_2" }
+    ],
     "host": "localhost",
-    "user": "dxuser",
+    "user": "root",
     "password": "secret",
-    "database": "dxdatabase",
     "port": 3308,
     "ssl": false
 }

@@ -183,7 +183,7 @@ export const validateDataBaseConfig = (databaseConfig = {}) => {
         host: "The database server host name",
         user: "The database user name",
         password: "The database user password",
-        database: "The actual database",
+        // database: "The actual database",
         port: 3306,
         ssl: "true|false",
         moduleSchemaMapping: [{ moduleName: "main", schemaName: "some_database_schema_name" }],
