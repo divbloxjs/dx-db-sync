@@ -2,7 +2,13 @@ const { createHash } = await import("node:crypto");
 import mysql from "mysql2/promise";
 
 import { outputFormattedLog, getCommandLineInput, printErrorMessage } from "dx-cli-tools/helpers.js";
-import { DB_IMPLEMENTATION_TYPES, headingFormat, subHeadingFormat, warningFormat, successFormat } from "./constants.js";
+import {
+    DB_IMPLEMENTATION_TYPES,
+    HEADING_FORMAT,
+    SUB_HEADING_FORMAT,
+    WARNING_FORMAT,
+    SUCCESS_FORMAT,
+} from "./constants.js";
 import { validateDataModel, validateDataBaseConfig } from "./optionValidation.js";
 
 import {
@@ -34,7 +40,7 @@ import {
  * @property {string} schemaName The name of the database schema to which the module name maps
  */
 
-let databaseCaseImplementation = DB_IMPLEMENTATION_TYPES.snakecase;
+let databaseCaseImplementation = DB_IMPLEMENTATION_TYPES.SNAKE_CASE;
 let dataModel;
 let databaseConfig = {
     host: "localhost",
@@ -62,22 +68,32 @@ let foreignKeyChecksDisabled = false;
  * @param {Object} options Init options
  * @param {string} options.dataModelPath The path to the file that contains the data model JSON to sync
  * @param {keyof DB_IMPLEMENTATION_TYPES} options.databaseCaseImplementation
- * @param {keyof DB_CONFIG_OPTIONS} options.databaseConfig The database configuration
- * @param {string} options.databaseConfig.host The database server host name
- * @param {string} options.databaseConfig.user The database user name
- * @param {string} options.databaseConfig.password The database user password
- * @param {number} options.databaseConfig.port The database port to connect through
- * @param {Array<DB_CONFIG_OPTIONS>|false} options.databaseConfig.ssl SSL options to configure
- * @param {string} options.databaseConfig.ssl.ca The path to the SSL ca
- * @param {string} options.databaseConfig.ssl.key The path to the SSL key
- * @param {string} options.databaseConfig.ssl.cert The path to the SSL cert
- * @param {Array<DB_MODULE_SCHEMA_MAPPING>} options.databaseConfig.moduleSchemaMapping A map between module names and database schema names
+ * @param {string} options.databaseConfigPath The database configuration
+
  */
-const init = async (options = {}) => {
-    dataModel = validateDataModel(options?.dataModel);
+export const init = async (options = {}) => {
+    if (!options?.dataModelPath) {
+        printErrorMessage("No data model path provided");
+        return false;
+    }
+
+    if (!options?.databaseConfigPath) {
+        printErrorMessage("No database server configuration path provided");
+        return false;
+    }
+
+    let { default: fileDataModel } = await import(`${process.env.PWD}/${options.dataModelPath}`, {
+        assert: { type: "json" },
+    });
+
+    dataModel = validateDataModel(fileDataModel);
     if (!dataModel) return false;
 
-    databaseConfig = validateDataBaseConfig(options?.databaseConfig);
+    let { default: fileDatabaseConfig } = await import(`${process.env.PWD}/${options.databaseConfigPath}`, {
+        assert: { type: "json" },
+    });
+
+    databaseConfig = validateDataBaseConfig(fileDatabaseConfig);
     if (!databaseConfig) return false;
 
     if (options?.databaseCaseImplementation) {
@@ -134,13 +150,13 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     const initSuccess = await init(options);
     if (!initSuccess) process.exit(1);
 
-    outputFormattedLog("Database connection established and initial data model validation passed!", subHeadingFormat);
+    outputFormattedLog("Database connection established and initial data model validation passed!", SUB_HEADING_FORMAT);
 
     // 1. Checking if data model and database connections are correct
     const passedDataModelCheck = await checkDataModelIntegrity();
     if (!passedDataModelCheck) process.exit(1);
 
-    outputFormattedLog("Data model integrity check succeeded!", subHeadingFormat);
+    outputFormattedLog("Data model integrity check succeeded!", SUB_HEADING_FORMAT);
 
     await disableForeignKeyChecks();
 
@@ -169,13 +185,13 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
     await removeTables(tablesToRemove, skipUserPrompts);
 
     // await commitForAllModuleConnections();
-    await rollbackForAllModuleConnections();
+    // await rollbackForAllModuleConnections();
     // process.exit(0);
     // return;
 
     if (foreignKeyChecksDisabled) await restoreForeignKeyChecks();
 
-    outputFormattedLog("Database clean up completed!", subHeadingFormat);
+    outputFormattedLog("Database clean up completed!", SUB_HEADING_FORMAT);
 
     startNewCommandLineSection("Create new tables");
     const createResult = await createTables(tablesToCreate);
@@ -185,7 +201,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
         process.exit(0);
     }
 
-    outputFormattedLog("Table creation completed!", subHeadingFormat);
+    outputFormattedLog("Table creation completed!", SUB_HEADING_FORMAT);
 
     // 4a. We call updateRelationships here to ensure any redundant foreign key constraints are removed before
     //      attempting to update the tables. This sidesteps any constraint-related errors
@@ -209,7 +225,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
         return false;
     }
 
-    outputFormattedLog("Table modification completed!", subHeadingFormat);
+    outputFormattedLog("Table modification completed!", SUB_HEADING_FORMAT);
 
     // 5. Loop through all the entities in the data model and update their corresponding database tables
     //      to ensure that their indexes match the data model indexes
@@ -221,7 +237,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
         return false;
     }
 
-    outputFormattedLog("Indexes up to date!", subHeadingFormat);
+    outputFormattedLog("Indexes up to date!", SUB_HEADING_FORMAT);
 
     // 6. Loop through all the entities in the data model and update their corresponding database tables
     //      to ensure that their relationships match the data model relationships. Here we either create new
@@ -232,7 +248,7 @@ export const syncDatabase = async (options = {}, skipUserPrompts = false) => {
 
         return false;
     }
-    outputFormattedLog("Relationships up to date!", subHeadingFormat);
+    outputFormattedLog("Relationships up to date!", SUB_HEADING_FORMAT);
 
     startNewCommandLineSection("Database sync completed successfully!");
     process.exit(0);
@@ -352,16 +368,18 @@ const removeTablesRecursive = async (tablesToRemove = [], mustConfirm = true) =>
     if (!mustConfirm) {
         // Not going to be recursive. Just a single call to drop all relevant tables
         for (const [moduleName, { connection }] of Object.entries(moduleConnections)) {
-            if (typeof tableModuleMapping[moduleName] !== undefined && tableModuleMapping[moduleName].length > 0) {
+            console.log("moduleName", moduleName);
+            console.log("tableModuleMapping", tableModuleMapping);
+            if (typeof tableModuleMapping[moduleName] !== undefined && tableModuleMapping[moduleName]?.length > 0) {
                 const tablesToDrop = tablesToRemove.filter((name) => !tableModuleMapping[moduleName].includes(name));
                 const tablesToDropStr = tablesToDrop.join(",");
 
                 try {
                     await connection.query(`DROP TABLE IF EXISTS ${tablesToDropStr}`);
-                    outputFormattedLog(`Removed table(s): ${tablesToDropStr}`, subHeadingFormat);
+                    outputFormattedLog(`Removed table(s): ${tablesToDropStr}`, SUB_HEADING_FORMAT);
                 } catch (err) {
                     await connection.rollback();
-                    outputFormattedLog(`Error dropping tables '${tablesToDropStr}':`, warningFormat);
+                    outputFormattedLog(`Error dropping tables '${tablesToDropStr}':`, WARNING_FORMAT);
                     console.log(err);
                     continue;
                 }
@@ -828,11 +846,11 @@ const getEntityRelationshipConstraint = (entityName) => {
             let constraintName = "";
             let splitter = "_";
             switch (databaseCaseImplementation.toLowerCase()) {
-                case "lowercase":
+                case DB_IMPLEMENTATION_TYPES.SNAKE_CASE:
                     splitter = "_";
                     break;
-                case "pascalcase":
-                case "camelcase":
+                case DB_IMPLEMENTATION_TYPES.PASCAL_CASE:
+                case DB_IMPLEMENTATION_TYPES.CAMEL_CASE:
                     splitter = "";
                     break;
                 default:
@@ -864,11 +882,11 @@ const getEntityRelationshipFromRelationshipColumn = (entityName, relationshipCol
 
             let columnName = "";
             switch (databaseCaseImplementation.toLowerCase()) {
-                case "lowercase":
+                case DB_IMPLEMENTATION_TYPES.SNAKE_CASE:
                     columnName = relationshipPart + "_" + relationshipNamePart;
                     break;
-                case "pascalcase":
-                case "camelcase":
+                case DB_IMPLEMENTATION_TYPES.PASCAL_CASE:
+                case DB_IMPLEMENTATION_TYPES.CAMEL_CASE:
                     columnName = relationshipPart + relationshipNamePart;
                     break;
                 default:
@@ -961,11 +979,11 @@ const getAlterColumnSql = (columnName = "", columnDataModelObject = {}, operatio
  */
 const getPrimaryKeyColumn = () => {
     switch (databaseCaseImplementation.toLowerCase()) {
-        case "lowercase":
+        case DB_IMPLEMENTATION_TYPES.SNAKE_CASE:
             return "id";
-        case "pascalcase":
+        case DB_IMPLEMENTATION_TYPES.PASCAL_CASE:
             return "Id";
-        case "camelcase":
+        case DB_IMPLEMENTATION_TYPES.CAMEL_CASE:
             return "id";
         default:
             return "id";
@@ -980,11 +998,11 @@ const getPrimaryKeyColumn = () => {
  */
 const getLockingConstraintColumn = () => {
     switch (databaseCaseImplementation.toLowerCase()) {
-        case "lowercase":
+        case DB_IMPLEMENTATION_TYPES.SNAKE_CASE:
             return "last_updated";
-        case "pascalcase":
+        case DB_IMPLEMENTATION_TYPES.PASCAL_CASE:
             return "LastUpdated";
-        case "camelcase":
+        case DB_IMPLEMENTATION_TYPES.CAMEL_CASE:
             return "lastUpdated";
         default:
             return "last_updated";
@@ -1006,11 +1024,11 @@ const getEntityRelationshipColumns = (entityName) => {
 
             let columnName = "";
             switch (databaseCaseImplementation.toLowerCase()) {
-                case "lowercase":
+                case DB_IMPLEMENTATION_TYPES.SNAKE_CASE:
                     columnName = relationshipPart + "_" + relationshipNamePart;
                     break;
-                case "pascalcase":
-                case "camelcase":
+                case DB_IMPLEMENTATION_TYPES.PASCAL_CASE:
+                case DB_IMPLEMENTATION_TYPES.CAMEL_CASE:
                     columnName = relationshipPart + relationshipNamePart;
                     break;
                 default:
@@ -1025,7 +1043,9 @@ const getEntityRelationshipColumns = (entityName) => {
 
 const checkDataModelIntegrity = async () => {
     startNewCommandLineSection("Data model integrity check");
+    console.log("Object.keys(moduleConnections)", Object.keys(moduleConnections));
     for (const [entityName, entityDefinition] of Object.entries(dataModel)) {
+        console.log("entityDefinition.module", entityDefinition.module);
         if (!Object.keys(moduleConnections).includes(entityDefinition.module)) {
             printErrorMessage(`Entity '${entityName}' has an invalid module provided: ${entityDefinition.module}`);
             console.log(`Configured modules: ${Object.keys(moduleConnections).join(", ")}`);
@@ -1057,9 +1077,9 @@ const checkDataModelIntegrity = async () => {
 
 const startNewCommandLineSection = (sectionHeading = "") => {
     const lineText = "-".repeat(process.stdout.columns);
-    outputFormattedLog(lineText, headingFormat);
-    outputFormattedLog(sectionHeading, headingFormat);
-    outputFormattedLog(lineText, headingFormat);
+    outputFormattedLog(lineText, HEADING_FORMAT);
+    outputFormattedLog(sectionHeading, HEADING_FORMAT);
+    outputFormattedLog(lineText, HEADING_FORMAT);
 };
 
 //#region Case Helpers
@@ -1071,12 +1091,12 @@ const startNewCommandLineSection = (sectionHeading = "") => {
 const getCaseNormalizedString = (inputString = "") => {
     let preparedString = inputString;
     switch (databaseCaseImplementation.toLowerCase()) {
-        case "snakecase":
+        case DB_IMPLEMENTATION_TYPES.SNAKE_CASE:
             return getCamelCaseSplittedToLowerCase(inputString, "_");
-        case "pascalcase":
+        case DB_IMPLEMENTATION_TYPES.PASCAL_CASE:
             preparedString = getCamelCaseSplittedToLowerCase(inputString, "_");
             return convertLowerCaseToPascalCase(preparedString, "_");
-        case "camelcase":
+        case DB_IMPLEMENTATION_TYPES.CAMEL_CASE:
             preparedString = getCamelCaseSplittedToLowerCase(inputString, "_");
             return convertLowerCaseToCamelCase(preparedString, "_");
         default:
@@ -1094,10 +1114,10 @@ const getCaseDenormalizedString = (inputString = "") => {
     // Since the data model expects camelCase, this function converts back to that
     let preparedString = inputString;
     switch (databaseCaseImplementation.toLowerCase()) {
-        case "snakecase":
+        case DB_IMPLEMENTATION_TYPES.SNAKE_CASE:
             return convertLowerCaseToCamelCase(inputString, "_");
-        case "pascalcase":
-        case "camelcase":
+        case DB_IMPLEMENTATION_TYPES.PASCAL_CASE:
+        case DB_IMPLEMENTATION_TYPES.CAMEL_CASE:
             preparedString = getCamelCaseSplittedToLowerCase(inputString, "_");
             return convertLowerCaseToCamelCase(preparedString, "_");
         default:
@@ -1152,7 +1172,7 @@ const restoreForeignKeyChecks = async () => {
  */
 const listTablesToRemove = (tablesToRemove) => {
     for (const tableName of tablesToRemove) {
-        outputFormattedLog(`${tableName} (${existingTables[tableName]})`, successFormat);
+        outputFormattedLog(`${tableName} (${existingTables[tableName]})`, SUCCESS_FORMAT);
     }
 };
 

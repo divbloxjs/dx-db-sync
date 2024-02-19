@@ -7,6 +7,10 @@ import databaseConfig from "./database-config.json" assert { type: "json" };
 import dataModel from "./example-data-model.json" assert { type: "json" };
 
 await syncDatabase(
-    { databaseCaseImplementation: "snakecase", databaseConfig: databaseConfig, dataModel: dataModel },
+    {
+        databaseCaseImplementation: "snakecase",
+        databaseConfig: databaseConfig,
+        dataModelPath: "./tests/example-data-model.json",
+    },
     false,
 );

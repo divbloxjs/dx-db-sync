@@ -1,5 +1,5 @@
 import { printErrorMessage } from "dx-cli-tools/helpers.js";
-import { isValidObject } from "dx-utilities";
+import { isValidObject, checkPrimitiveArraysAreEqual } from "dx-utilities";
 
 let dataModel;
 export const validateDataModel = (dataModelToCheck = {}) => {
@@ -92,7 +92,7 @@ const validateAttribute = (entityName, attributeName, attributeDefinition = {}) 
     };
 
     const attributeProperties = Object.keys(attributeDefinition);
-    if (!checkArraysAreEqual(attributeProperties, Object.keys(expectedAttributeDefinition))) {
+    if (!checkPrimitiveArraysAreEqual(attributeProperties, Object.keys(expectedAttributeDefinition))) {
         printErrorMessage(`Invalid attribute definition for '${entityName}' (${attributeName})`);
         console.log("Provided: ", attributeDefinition);
         console.log("Expected: ", expectedAttributeDefinition);
@@ -113,7 +113,7 @@ const validateIndex = (entityName, indexDefinition = {}) => {
     };
 
     const indexProperties = Object.keys(indexDefinition);
-    if (!checkArraysAreEqual(indexProperties, Object.keys(expectedIndexDefinition))) {
+    if (!checkPrimitiveArraysAreEqual(indexProperties, Object.keys(expectedIndexDefinition))) {
         printErrorMessage(`Invalid index definition for '${entityName}' (${indexDefinition.indexName})`);
         console.log("Provided: ", indexDefinition);
         console.log("Expected: ", expectedIndexDefinition);
@@ -163,7 +163,7 @@ const validateOptions = (entityName, options = {}) => {
 
     const optionProperties = Object.keys(options);
 
-    if (!checkArraysAreEqual(optionProperties, Object.keys(expectedOptionsDefinition))) {
+    if (!checkPrimitiveArraysAreEqual(optionProperties, Object.keys(expectedOptionsDefinition))) {
         printErrorMessage(`Invalid option definition for '${entityName}'`);
         console.log("Provided: ", options);
         console.log("Expected: ", expectedOptionsDefinition);
@@ -190,7 +190,7 @@ export const validateDataBaseConfig = (databaseConfig = {}) => {
     };
 
     const databaseConfigProperties = Object.keys(databaseConfig);
-    if (!checkArraysAreEqual(databaseConfigProperties, Object.keys(expectedDatabaseConfig))) {
+    if (!checkPrimitiveArraysAreEqual(databaseConfigProperties, Object.keys(expectedDatabaseConfig))) {
         printErrorMessage(`Invalid database server configuration provided:`);
         console.log("Provided: ", databaseConfig);
         console.log("Expected: ", expectedDatabaseConfig);
@@ -200,7 +200,7 @@ export const validateDataBaseConfig = (databaseConfig = {}) => {
     return databaseConfig;
 };
 
-const checkArraysAreEqual = (a, b) => {
+const checkPrimitiveArraysAreEqual = (a, b) => {
     return (
         Array.isArray(a) &&
         Array.isArray(b) &&
