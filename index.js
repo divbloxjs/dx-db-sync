@@ -66,34 +66,21 @@ let foreignKeyChecksDisabled = false;
 
 /**
  * @param {Object} options Init options
- * @param {string} options.dataModelPath The path to the file that contains the data model JSON to sync
+ * @param {string} options.dataModel The path to the file that contains the data model JSON to sync
  * @param {keyof DB_IMPLEMENTATION_TYPES} options.databaseCaseImplementation
  * @param {string} options.databaseConfigPath The database configuration
 
  */
 export const init = async (options = {}) => {
-    if (!options?.dataModelPath) {
-        printErrorMessage("No data model path provided");
-        return false;
-    }
-
-    if (!options?.databaseConfigPath) {
-        printErrorMessage("No database server configuration path provided");
-        return false;
-    }
-
-    let { default: fileDataModel } = await import(`${process.env.PWD}/${options.dataModelPath}`, {
-        assert: { type: "json" },
-    });
-
-    dataModel = validateDataModel(fileDataModel);
+    dataModel = validateDataModel(options?.dataModel);
     if (!dataModel) return false;
 
-    let { default: fileDatabaseConfig } = await import(`${process.env.PWD}/${options.databaseConfigPath}`, {
-        assert: { type: "json" },
-    });
+    if (!options?.databaseConfig) {
+        printErrorMessage("No database server configuration provided");
+        return false;
+    }
 
-    databaseConfig = validateDataBaseConfig(fileDatabaseConfig);
+    databaseConfig = validateDataBaseConfig(options?.databaseConfig);
     if (!databaseConfig) return false;
 
     if (options?.databaseCaseImplementation) {

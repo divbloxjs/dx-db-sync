@@ -3,6 +3,11 @@ import { isValidObject, checkPrimitiveArraysAreEqual } from "dx-utilities";
 
 let dataModel;
 export const validateDataModel = (dataModelToCheck = {}) => {
+    if (!dataModelToCheck) {
+        printErrorMessage("No data model provided");
+        return false;
+    }
+
     dataModel = dataModelToCheck;
     if (!isValidObject(dataModel)) {
         printErrorMessage("Data model is not a valid object");
@@ -175,6 +180,11 @@ const validateOptions = (entityName, options = {}) => {
 //#endregion
 
 export const validateDataBaseConfig = (databaseConfig = {}) => {
+    if (!databaseConfig) {
+        printErrorMessage("No database server configuration provided");
+        return false;
+    }
+
     if (!isValidObject(databaseConfig)) {
         printErrorMessage(`Database server configuration not provided as an object`);
         return false;
