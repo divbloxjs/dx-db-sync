@@ -66,10 +66,18 @@ let foreignKeyChecksDisabled = false;
 
 /**
  * @param {Object} options Init options
- * @param {string} options.dataModel The path to the file that contains the data model JSON to sync
+ * @param {Object} options.dataModel The data model to synchronize
  * @param {keyof DB_IMPLEMENTATION_TYPES} options.databaseCaseImplementation
- * @param {string} options.databaseConfigPath The database configuration
-
+ * @param {keyof DB_CONFIG_OPTIONS} options.databaseConfig The database configuration
+ * @param {string} options.databaseConfig.host The database server host name
+ * @param {string} options.databaseConfig.user The database user name
+ * @param {string} options.databaseConfig.password The database user password
+ * @param {number} options.databaseConfig.port The database port to connect through
+ * @param {Array<DB_CONFIG_OPTIONS>|false} options.databaseConfig.ssl SSL options to configure
+ * @param {string} options.databaseConfig.ssl.ca The path to the SSL ca
+ * @param {string} options.databaseConfig.ssl.key The path to the SSL key
+ * @param {string} options.databaseConfig.ssl.cert The path to the SSL cert
+ * @param {Array<DB_MODULE_SCHEMA_MAPPING>} options.databaseConfig.moduleSchemaMapping A map between module names and database schema names
  */
 export const init = async (options = {}) => {
     dataModel = validateDataModel(options?.dataModel);
