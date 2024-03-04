@@ -1,4 +1,6 @@
 # dx-db-sync
+>[!WARNING]
+>This tool has been deprecated. This repo will no longer be actively developed. To use Divblox in your project, please visit: https://github.com/divbloxjs/divblox
 
 A tool that synchronises a given database with a provided Divblox data model. Used by divbloxjs to ensure that the underlying database corresponds to the given data model.
 
